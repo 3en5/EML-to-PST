@@ -30,3 +30,6 @@ target_compile_definitions(wlm2pst_tests PRIVATE
 include(CTest)
 include(Catch)
 catch_discover_tests(wlm2pst_tests)
+
+# Outlook-dependent integration tests (Windows-only; no-op elsewhere).
+add_subdirectory(integration)
