@@ -1,0 +1,68 @@
+{
+  "version": 4,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "msvc-x86-release",
+      "displayName": "MSVC Win32 Release (launcher + x86 worker)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "Win32",
+      "binaryDir": "${sourceDir}/build/msvc-x86",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": { "WLM2PST_BUILD_TESTS": "ON" }
+    },
+    {
+      "name": "msvc-x64-release",
+      "displayName": "MSVC x64 Release (x64 worker)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/msvc-x64",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": { "WLM2PST_BUILD_TESTS": "ON" }
+    },
+    {
+      "name": "mingw-x86",
+      "displayName": "MinGW i686 cross compile-check",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/mingw-x86",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-mingw-i686.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "WLM2PST_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "mingw-x64",
+      "displayName": "MinGW x86_64 cross compile-check",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/mingw-x64",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-mingw-x86_64.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "WLM2PST_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "linux-tests",
+      "displayName": "Native build for portable-core unit tests",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux-tests",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "WLM2PST_BUILD_TESTS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "msvc-x86-release", "configurePreset": "msvc-x86-release", "configuration": "Release" },
+    { "name": "msvc-x64-release", "configurePreset": "msvc-x64-release", "configuration": "Release" },
+    { "name": "mingw-x86", "configurePreset": "mingw-x86" },
+    { "name": "mingw-x64", "configurePreset": "mingw-x64" },
+    { "name": "linux-tests", "configurePreset": "linux-tests" }
+  ],
+  "testPresets": [
+    { "name": "msvc-x86-release", "configurePreset": "msvc-x86-release", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "msvc-x64-release", "configurePreset": "msvc-x64-release", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "linux-tests", "configurePreset": "linux-tests", "output": { "outputOnFailure": true } }
+  ]
+}

@@ -1,0 +1,16 @@
+// Generated from version.h.in by CMake - do not edit.
+#pragma once
+
+namespace wlm2pst {
+
+inline constexpr const char* kToolVersion = "@PROJECT_VERSION@";
+inline constexpr const wchar_t* kToolVersionW = L"@PROJECT_VERSION@";
+inline constexpr int kVersionMajor = @PROJECT_VERSION_MAJOR@;
+inline constexpr int kVersionMinor = @PROJECT_VERSION_MINOR@;
+inline constexpr int kVersionPatch = @PROJECT_VERSION_PATCH@;
+
+// Architecture of the current binary.
+inline constexpr const char* kBuildArch = sizeof(void*) == 8 ? "x64" : "x86";
+inline constexpr const wchar_t* kBuildArchW = sizeof(void*) == 8 ? L"x64" : L"x86";
+
+}  // namespace wlm2pst

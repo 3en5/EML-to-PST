@@ -1,0 +1,13 @@
+{
+  "name": "wlm2pst",
+  "version-string": "1.0.0",
+  "description": "Convert a Windows Live Mail .eml folder tree into one Unicode PST",
+  "dependencies": [],
+  "features": {
+    "tests": {
+      "description": "Unit test framework",
+      "dependencies": ["catch2"]
+    }
+  },
+  "default-features": ["tests"]
+}
