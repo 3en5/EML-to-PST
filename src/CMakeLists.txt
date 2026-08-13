@@ -55,7 +55,8 @@ if(WIN32)
     wlm2pst_collect_sources(WLM2PST_MAPI_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/worker/mapi/*.cpp)
     if(WLM2PST_MAPI_SOURCES)
         add_library(wlm2pst_mapi STATIC ${WLM2PST_MAPI_SOURCES})
-        target_link_libraries(wlm2pst_mapi PUBLIC wlm2pst_common ole32 oleaut32 advapi32)
+        target_link_libraries(wlm2pst_mapi PUBLIC wlm2pst_common wlm2pst_worker_core
+            ole32 oleaut32 advapi32 shlwapi)
     endif()
 
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/worker/main.cpp AND TARGET wlm2pst_mapi)
