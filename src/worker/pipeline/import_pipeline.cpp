@@ -2,6 +2,7 @@
 
 #include "common/hashing/sha256.h"
 #include "common/logging/logger.h"
+#include "common/paths/path_utils.h"
 #include "common/unicode/utf.h"
 #include "worker/dates/date_parser.h"
 #include "worker/folder_mapping/folder_aliases.h"
@@ -29,16 +30,21 @@ std::vector<std::wstring> split_segments(const std::wstring& path) {
 }
 
 // Joins the source root and a backslash-relative path into an openable
-// absolute path. On POSIX test builds the separators are translated so the
-// portable pipeline tests can exercise real files.
+// absolute path. On Windows the result carries the \\?\ extended-length
+// prefix so files beyond MAX_PATH open regardless of the machine-wide
+// LongPathsEnabled policy (real WLM archives have >255-char paths). On POSIX
+// test builds the separators are translated so the portable pipeline tests
+// can exercise real files.
 std::wstring join_absolute(const std::wstring& root, const std::wstring& relative) {
     std::wstring absolute = root + L"\\" + relative;
-#ifndef _WIN32
+#ifdef _WIN32
+    return to_extended_length_path(std::move(absolute));
+#else
     for (auto& c : absolute) {
         if (c == L'\\') c = L'/';
     }
-#endif
     return absolute;
+#endif
 }
 
 // Reads up to `cap` bytes from the start of the file (header inspection).

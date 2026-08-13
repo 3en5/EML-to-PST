@@ -1,5 +1,7 @@
 #include "worker/mapi/mime_converter.h"
 
+#include "common/logging/logger.h"
+#include "common/unicode/utf.h"
 #include "worker/mapi/mapi_runtime.h"
 #include "worker/normalize/eml_normalizer.h"
 
@@ -142,8 +144,10 @@ std::wstring resolve_outlmime_path() {
 // directly - the same fallback MFCMAPI relies on. Verified empirically:
 // MSMAPI32/OLMAPI32 return CLASS_E_CLASSNOTAVAILABLE for this CLSID, and
 // OUTLMIME.DLL is the module that actually serves it.
-HRESULT create_converter_via_outlook_dll(REFCLSID clsid, REFIID iid, void** out) {
+HRESULT create_converter_via_outlook_dll(REFCLSID clsid, REFIID iid, void** out,
+                                         std::wstring& used_dll) {
     const std::wstring dll = resolve_outlmime_path();
+    used_dll = dll;
     HMODULE mod = GetModuleHandleW(dll.c_str());
     if (!mod) {
         mod = LoadLibraryExW(dll.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -166,9 +170,19 @@ Result<MimeConverter> MimeConverter::create() {
     MimeConverter converter;
     HRESULT hr = CoCreateInstance(kClsidIConverterSession, nullptr, CLSCTX_INPROC_SERVER,
                                   kIidIConverterSession, converter.session_.put_void());
-    if (hr == REGDB_E_CLASSNOTREG || hr == CLASS_E_CLASSNOTAVAILABLE) {
+    if (SUCCEEDED(hr)) {
+        // Which path served the converter matters for field diagnosis (the
+        // C2R fallback is the prime suspect whenever converted content looks
+        // wrong); DLL paths are operational data, never message content.
+        global_logger().verbose("MIME converter acquired via CoCreateInstance (registry COM)");
+    } else if (hr == REGDB_E_CLASSNOTREG || hr == CLASS_E_CLASSNOTAVAILABLE) {
+        std::wstring used_dll;
         hr = create_converter_via_outlook_dll(kClsidIConverterSession, kIidIConverterSession,
-                                              converter.session_.put_void());
+                                              converter.session_.put_void(), used_dll);
+        if (SUCCEEDED(hr)) {
+            global_logger().verbose("MIME converter acquired via DllGetClassObject fallback: " +
+                                    utf8_from_wide(used_dll));
+        }
     }
     if (FAILED(hr)) {
         return make_hresult_error(static_cast<int32_t>(hr), "CoCreateInstance(IConverterSession)",

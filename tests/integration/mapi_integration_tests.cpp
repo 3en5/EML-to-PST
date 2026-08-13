@@ -17,9 +17,11 @@
 // end-to-end harness's rule in tests/e2e/run_e2e.ps1).
 #ifdef _WIN32
 
+#include <catch2/catch_message.hpp>  // INFO / UNSCOPED_INFO
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <cstdio>
 #include <ctime>
 #include <filesystem>
 #include <memory>
@@ -190,21 +192,139 @@ struct RawMessageProps {
     std::wstring body;
     ULONG message_flags = 0;
     bool has_attach = false;
+    ULONG attach_count = 0;
+    std::vector<std::wstring> attachment_names;
+    // Self-describing read log: per-property status, so a failing CHECK shows
+    // WHAT was actually read (or which HRESULT blocked reading it).
+    std::string diagnostics;
 };
 
+std::string hex32(int64_t v) {
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "0x%08X", static_cast<uint32_t>(v));
+    return buf;
+}
+
+// Renders RawMessageProps for UNSCOPED_INFO so assertion failures are
+// self-describing (subject/body content is synthetic fixture data; the spec's
+// privacy rules bind the tool's logs, not this test binary's local output).
+std::string render_raw(const RawMessageProps& p) {
+    std::string s = "class='" + utf8_from_wide(p.message_class) + "'";
+    s += " subject='" + utf8_from_wide(p.subject) + "'";
+    std::wstring body_head = p.body.substr(0, 120);
+    s += " body[0..120]='" + utf8_from_wide(body_head) + "'";
+    s += " flags=" + hex32(p.message_flags);
+    s += " has_attach=" + std::string(p.has_attach ? "true" : "false");
+    s += " attach_count=" + std::to_string(p.attach_count);
+    for (const auto& n : p.attachment_names) s += " attach='" + utf8_from_wide(n) + "'";
+    if (!p.diagnostics.empty()) s += " |reads:" + p.diagnostics;
+    return s;
+}
+
+// Reads one string property directly from an opened message, with the
+// documented large-property fallback: GetProps answering
+// MAPI_E_NOT_ENOUGH_MEMORY means "too big for GetProps, use a stream".
+// Tables must NOT be used for PR_BODY: providers routinely omit large
+// properties from content tables entirely, which is exactly the bug the
+// first Windows verification round hit.
+std::wstring read_string_prop(mapi::MapiRuntime& runtime, IMessage& message, ULONG tag,
+                              const char* label, std::string& diagnostics) {
+    SizedSPropTagArray(1, tags) = {1, {tag}};
+    ULONG count = 0;
+    LPSPropValue values = nullptr;
+    HRESULT hr = message.GetProps(reinterpret_cast<LPSPropTagArray>(&tags), 0, &count, &values);
+    mapi::MapiBuffer guard(runtime.MAPIFreeBuffer);
+    *guard.put() = values;
+
+    if (!FAILED(hr) && count > 0 && PROP_TYPE(values[0].ulPropTag) == PT_UNICODE) {
+        diagnostics += std::string(" ") + label + ":ok";
+        return values[0].Value.lpszW;
+    }
+    SCODE sc = (count > 0 && PROP_TYPE(values[0].ulPropTag) == PT_ERROR)
+                   ? values[0].Value.err
+                   : static_cast<SCODE>(hr);
+    if (sc == static_cast<SCODE>(MAPI_E_NOT_ENOUGH_MEMORY)) {
+        mapi::MapiPtr<IStream> stream;
+        hr = message.OpenProperty(tag, &IID_IStream, 0, 0, stream.put_unknown());
+        if (SUCCEEDED(hr)) {
+            std::wstring out;
+            wchar_t buf[4096];
+            ULONG read = 0;
+            for (;;) {
+                hr = stream->Read(buf, sizeof(buf), &read);
+                if (FAILED(hr) || read == 0) break;
+                out.append(buf, read / sizeof(wchar_t));
+                if (out.size() > 1'000'000) break;  // plenty for verification
+            }
+            diagnostics += std::string(" ") + label + ":ok(stream)";
+            return out;
+        }
+        diagnostics += std::string(" ") + label + ":OpenProperty=" + hex32(hr);
+        return {};
+    }
+    diagnostics += std::string(" ") + label + ":err=" + hex32(sc);
+    return {};
+}
+
+// Enumerates the attachment table of an opened message: count + best-effort
+// display names (long filename, then short filename, then display name).
+void read_attachments(mapi::MapiRuntime& runtime, IMessage& message, RawMessageProps& out) {
+    mapi::MapiPtr<IMAPITable> table;
+    HRESULT hr = message.GetAttachmentTable(0, table.put());
+    if (FAILED(hr)) {
+        out.diagnostics += " attach_table:err=" + hex32(hr);
+        return;
+    }
+    enum { kNum, kLong, kShort, kDisplay, kCount };
+    SizedSPropTagArray(kCount, cols) = {
+        kCount, {PR_ATTACH_NUM, PR_ATTACH_LONG_FILENAME_W, PR_ATTACH_FILENAME_W, PR_DISPLAY_NAME_W}};
+    hr = table->SetColumns(reinterpret_cast<LPSPropTagArray>(&cols), 0);
+    if (FAILED(hr)) {
+        out.diagnostics += " attach_cols:err=" + hex32(hr);
+        return;
+    }
+    for (;;) {
+        LPSRowSet rows = nullptr;
+        hr = table->QueryRows(16, 0, &rows);
+        if (FAILED(hr)) {
+            out.diagnostics += " attach_rows:err=" + hex32(hr);
+            return;
+        }
+        mapi::RowSetGuard guard(rows, runtime.MAPIFreeBuffer);
+        if (!rows || rows->cRows == 0) break;
+        for (ULONG i = 0; i < rows->cRows; ++i) {
+            const SPropValue* p = rows->aRow[i].lpProps;
+            ++out.attach_count;
+            if (PROP_TYPE(p[kLong].ulPropTag) == PT_UNICODE) {
+                out.attachment_names.emplace_back(p[kLong].Value.lpszW);
+            } else if (PROP_TYPE(p[kShort].ulPropTag) == PT_UNICODE) {
+                out.attachment_names.emplace_back(p[kShort].Value.lpszW);
+            } else if (PROP_TYPE(p[kDisplay].ulPropTag) == PT_UNICODE) {
+                out.attachment_names.emplace_back(p[kDisplay].Value.lpszW);
+            } else {
+                out.attachment_names.emplace_back(L"<unnamed>");
+            }
+        }
+    }
+}
+
+Result<RawMessageProps> read_one_raw_message(mapi::MapiRuntime& runtime, IMsgStore& store,
+                                             const EntryId& entry_id);
+
+// Reads every message in a folder by opening each message individually
+// (entry ids come from the contents table; content comes from the message).
 Result<std::vector<RawMessageProps>> read_raw_message_props(mapi::MapiRuntime& runtime,
+                                                             IMsgStore& store,
                                                              IMAPIFolder& folder) {
     mapi::MapiPtr<IMAPITable> contents;
     HRESULT hr = folder.GetContentsTable(0, contents.put());
     if (FAILED(hr)) return make_hresult_error(static_cast<int32_t>(hr), "IMAPIFolder::GetContentsTable");
 
-    enum { kClass, kSubject, kBody, kFlags, kHasAttach, kCount };
-    SizedSPropTagArray(kCount, cols) = {
-        kCount, {PR_MESSAGE_CLASS_W, PR_SUBJECT_W, PR_BODY_W, PR_MESSAGE_FLAGS, PR_HASATTACH}};
+    SizedSPropTagArray(1, cols) = {1, {PR_ENTRYID}};
     hr = contents->SetColumns(reinterpret_cast<LPSPropTagArray>(&cols), 0);
     if (FAILED(hr)) return make_hresult_error(static_cast<int32_t>(hr), "IMAPITable::SetColumns");
 
-    std::vector<RawMessageProps> out;
+    std::vector<EntryId> ids;
     for (;;) {
         LPSRowSet rows = nullptr;
         hr = contents->QueryRows(64, 0, &rows);
@@ -212,15 +332,18 @@ Result<std::vector<RawMessageProps>> read_raw_message_props(mapi::MapiRuntime& r
         mapi::RowSetGuard guard(rows, runtime.MAPIFreeBuffer);
         if (!rows || rows->cRows == 0) break;
         for (ULONG i = 0; i < rows->cRows; ++i) {
-            const SPropValue* p = rows->aRow[i].lpProps;
-            RawMessageProps rp;
-            if (PROP_TYPE(p[kClass].ulPropTag) == PT_UNICODE) rp.message_class = p[kClass].Value.lpszW;
-            if (PROP_TYPE(p[kSubject].ulPropTag) == PT_UNICODE) rp.subject = p[kSubject].Value.lpszW;
-            if (PROP_TYPE(p[kBody].ulPropTag) == PT_UNICODE) rp.body = p[kBody].Value.lpszW;
-            if (PROP_TYPE(p[kFlags].ulPropTag) == PT_LONG) rp.message_flags = p[kFlags].Value.ul;
-            if (PROP_TYPE(p[kHasAttach].ulPropTag) == PT_BOOLEAN) rp.has_attach = p[kHasAttach].Value.b != 0;
-            out.push_back(std::move(rp));
+            const SPropValue& eid = rows->aRow[i].lpProps[0];
+            if (PROP_TYPE(eid.ulPropTag) == PT_BINARY) {
+                ids.emplace_back(eid.Value.bin.lpb, eid.Value.bin.lpb + eid.Value.bin.cb);
+            }
         }
+    }
+
+    std::vector<RawMessageProps> out;
+    for (const auto& id : ids) {
+        auto one = read_one_raw_message(runtime, store, id);
+        if (!one.ok()) return one.error();
+        out.push_back(std::move(one.value()));
     }
     return out;
 }
@@ -239,40 +362,45 @@ Result<mapi::MapiPtr<IMessage>> open_message(IMsgStore& store, const EntryId& en
     return msg;
 }
 
-Result<std::wstring> first_attachment_long_filename(mapi::MapiRuntime& runtime, IMessage& message) {
-    mapi::MapiPtr<IMAPITable> attach_table;
-    HRESULT hr = message.GetAttachmentTable(0, attach_table.put());
-    if (FAILED(hr)) return make_hresult_error(static_cast<int32_t>(hr), "IMessage::GetAttachmentTable");
+Result<RawMessageProps> read_one_raw_message(mapi::MapiRuntime& runtime, IMsgStore& store,
+                                             const EntryId& entry_id) {
+    auto message = open_message(store, entry_id);
+    if (!message.ok()) return message.error();
+    IMessage& msg = *message.value().get();
 
-    enum { kAttachNum, kAttachCount };
-    SizedSPropTagArray(kAttachCount, cols) = {kAttachCount, {PR_ATTACH_NUM}};
-    hr = attach_table->SetColumns(reinterpret_cast<LPSPropTagArray>(&cols), 0);
-    if (FAILED(hr)) return make_hresult_error(static_cast<int32_t>(hr), "IMAPITable::SetColumns(attach)");
+    RawMessageProps out;
+    out.message_class =
+        read_string_prop(runtime, msg, PR_MESSAGE_CLASS_W, "class", out.diagnostics);
+    out.subject = read_string_prop(runtime, msg, PR_SUBJECT_W, "subject", out.diagnostics);
+    out.body = read_string_prop(runtime, msg, PR_BODY_W, "body", out.diagnostics);
 
-    LPSRowSet rows = nullptr;
-    hr = attach_table->QueryRows(1, 0, &rows);
-    if (FAILED(hr)) return make_hresult_error(static_cast<int32_t>(hr), "IMAPITable::QueryRows(attach)");
-    mapi::RowSetGuard guard(rows, runtime.MAPIFreeBuffer);
-    if (!rows || rows->cRows == 0) {
-        return make_error("IMAPITable::QueryRows(attach)", "message has no attachments");
-    }
-    ULONG attach_num = rows->aRow[0].lpProps[kAttachNum].Value.ul;
-
-    mapi::MapiPtr<IAttach> attach;
-    hr = message.OpenAttach(attach_num, nullptr, MAPI_BEST_ACCESS, attach.put());
-    if (FAILED(hr)) return make_hresult_error(static_cast<int32_t>(hr), "IMessage::OpenAttach");
-
-    SizedSPropTagArray(1, name_cols) = {1, {PR_ATTACH_LONG_FILENAME_W}};
+    SizedSPropTagArray(2, tags) = {2, {PR_MESSAGE_FLAGS, PR_HASATTACH}};
     ULONG count = 0;
     LPSPropValue values = nullptr;
-    hr = attach->GetProps(reinterpret_cast<LPSPropTagArray>(&name_cols), 0, &count, &values);
-    mapi::MapiBuffer value_guard(runtime.MAPIFreeBuffer);
-    *value_guard.put() = values;
-    if (FAILED(hr) || count == 0 || PROP_TYPE(values[0].ulPropTag) != PT_UNICODE) {
-        return make_error("IAttach::GetProps(PR_ATTACH_LONG_FILENAME_W)",
-                          "attachment has no long filename");
+    HRESULT hr = msg.GetProps(reinterpret_cast<LPSPropTagArray>(&tags), 0, &count, &values);
+    mapi::MapiBuffer guard(runtime.MAPIFreeBuffer);
+    *guard.put() = values;
+    if (!FAILED(hr) && count >= 2) {
+        if (PROP_TYPE(values[0].ulPropTag) == PT_LONG) out.message_flags = values[0].Value.ul;
+        if (PROP_TYPE(values[1].ulPropTag) == PT_BOOLEAN) out.has_attach = values[1].Value.b != 0;
+    } else {
+        out.diagnostics += " flags:err=" + hex32(hr);
     }
-    return std::wstring(values[0].Value.lpszW);
+
+    read_attachments(runtime, msg, out);
+    return out;
+}
+
+Result<std::wstring> first_attachment_long_filename(mapi::MapiRuntime& runtime, IMsgStore& store,
+                                                    const EntryId& entry_id) {
+    auto props = read_one_raw_message(runtime, store, entry_id);
+    if (!props.ok()) return props.error();
+    UNSCOPED_INFO("attachment message: " + render_raw(props.value()));
+    if (props.value().attachment_names.empty()) {
+        return make_error("GetAttachmentTable", "message has no attachments; reads:" +
+                                                     props.value().diagnostics);
+    }
+    return props.value().attachment_names.front();
 }
 
 constexpr ULONG kMsgFlagRead = 0x1;
@@ -463,13 +591,18 @@ TEST_CASE("6: Hebrew subject, body, and attachment filename survive conversion",
 
     auto folder_ptr = raw.value()->store->open_folder(root);
     REQUIRE(folder_ptr.ok());
-    auto props = read_raw_message_props(raw.value()->runtime, *folder_ptr.value().get());
+    auto props = read_raw_message_props(raw.value()->runtime, *raw.value()->store->store(),
+                                        *folder_ptr.value().get());
     REQUIRE(props.ok());
     REQUIRE(props.value().size() == 3);
 
     bool subject_ok = false;
     bool body_ok = false;
     for (const auto& p : props.value()) {
+        // Self-describing: on failure the report shows exactly what each
+        // message actually contains (class/subject/body/flags/attachments)
+        // and any per-property read error codes.
+        UNSCOPED_INFO(render_raw(p));
         // "שלום עולם" - synthetic Hebrew test text (see tests/fixtures/README.md).
         if (p.subject.find(L"שלום עולם") !=
             std::wstring::npos) {
@@ -482,9 +615,9 @@ TEST_CASE("6: Hebrew subject, body, and attachment filename survive conversion",
     CHECK(subject_ok);
     CHECK(body_ok);
 
-    auto attach_msg = open_message(*raw.value()->store->store(), attachment_message_id);
-    REQUIRE(attach_msg.ok());
-    auto filename = first_attachment_long_filename(raw.value()->runtime, *attach_msg.value().get());
+    auto filename = first_attachment_long_filename(raw.value()->runtime,
+                                                   *raw.value()->store->store(),
+                                                   attachment_message_id);
     REQUIRE(filename.ok());
     // "מסמך.txt" - synthetic Hebrew attachment filename (see tests/fixtures/README.md).
     CHECK(filename.value() == L"מסמך.txt");
@@ -523,7 +656,8 @@ TEST_CASE("7: sent-folder messages are marked sent (MSGFLAG_FROMME, not UNSENT)"
     REQUIRE(raw.ok());
     auto folder_ptr = raw.value()->store->open_folder(root);
     REQUIRE(folder_ptr.ok());
-    auto props = read_raw_message_props(raw.value()->runtime, *folder_ptr.value().get());
+    auto props = read_raw_message_props(raw.value()->runtime, *raw.value()->store->store(),
+                                        *folder_ptr.value().get());
     REQUIRE(props.ok());
     REQUIRE(props.value().size() == 1);
     ULONG flags = props.value()[0].message_flags;
@@ -564,7 +698,8 @@ TEST_CASE("8: X-Unsent messages are marked draft (MSGFLAG_UNSENT)", "[.outlook][
     REQUIRE(raw.ok());
     auto folder_ptr = raw.value()->store->open_folder(root);
     REQUIRE(folder_ptr.ok());
-    auto props = read_raw_message_props(raw.value()->runtime, *folder_ptr.value().get());
+    auto props = read_raw_message_props(raw.value()->runtime, *raw.value()->store->store(),
+                                        *folder_ptr.value().get());
     REQUIRE(props.ok());
     REQUIRE(props.value().size() == 1);
     CHECK((props.value()[0].message_flags & kMsgFlagUnsent) != 0);
@@ -609,7 +744,8 @@ TEST_CASE("9: fallback preserves the original EML as an unchanged attachment",
     REQUIRE(raw.ok());
     auto folder_ptr = raw.value()->store->open_folder(errors_folder);
     REQUIRE(folder_ptr.ok());
-    auto props = read_raw_message_props(raw.value()->runtime, *folder_ptr.value().get());
+    auto props = read_raw_message_props(raw.value()->runtime, *raw.value()->store->store(),
+                                        *folder_ptr.value().get());
     REQUIRE(props.ok());
     REQUIRE(props.value().size() == 1);
     const auto& fallback = props.value()[0];
@@ -623,9 +759,9 @@ TEST_CASE("9: fallback preserves the original EML as an unchanged attachment",
     // the original subject/body in the first place).
     CHECK(fallback.body.find(L"broken_mime_boundary.eml") != std::wstring::npos);
 
-    auto msg = open_message(*raw.value()->store->store(), fallback_message_id);
-    REQUIRE(msg.ok());
-    auto filename = first_attachment_long_filename(raw.value()->runtime, *msg.value().get());
+    auto filename = first_attachment_long_filename(raw.value()->runtime,
+                                                   *raw.value()->store->store(),
+                                                   fallback_message_id);
     REQUIRE(filename.ok());
     CHECK(filename.value() == L"broken_mime_boundary.eml");
 }
@@ -661,9 +797,21 @@ TEST_CASE("10: WLM2PST tracking named properties round-trip through the PST",
     CHECK(t.source_relative_path == L"single_attachment.eml");
     CHECK(t.sha256_hex == metadata.sha256_hex);
     CHECK(t.run_id == run_id);
-    CHECK(t.has_attachments);  // the fixture carries one MIME attachment
 
     REQUIRE(session.value()->close().ok());
+
+    // Verify the attachment flag against an INDEPENDENT raw reopen too, and
+    // dump exactly what the message contains so a failure is self-describing
+    // (first Windows round: has_attachments was false with no further data).
+    auto raw = reopen_raw(pst_path);
+    REQUIRE(raw.ok());
+    auto raw_props = read_one_raw_message(raw.value()->runtime, *raw.value()->store->store(),
+                                          outcome.value().entry_id);
+    REQUIRE(raw_props.ok());
+    UNSCOPED_INFO("raw reopen: " + render_raw(raw_props.value()));
+    CHECK(raw_props.value().attach_count == 1);   // the fixture carries one MIME attachment
+    CHECK(raw_props.value().has_attach);
+    CHECK(t.has_attachments);  // product API view (contents-table PR_HASATTACH)
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +902,83 @@ TEST_CASE("13: x64 worker matches a 64-bit classic Outlook installation", "[.out
     auto env = require_outlook_or_skip();
     (void)env;  // preflight_check() already validated bitness agreement.
     SUCCEED("x64 worker preflight succeeded against a 64-bit Outlook MAPI installation.");
+}
+
+// ---------------------------------------------------------------------------
+// Operator diagnostic (not a test of anything): dump the full content of an
+// arbitrary PST so a human can verify a conversion on machines where Outlook
+// COM automation is unavailable (Click-to-Run). Usage:
+//     set WLM2PST_DUMP_PST=D:\path\to\file.pst
+//     wlm2pst_integration_tests.exe "[.dump]"
+// Prints every folder with each message's class/subject/flags/attachment
+// names and the first lines of the body (UTF-8 to stdout).
+// ---------------------------------------------------------------------------
+TEST_CASE("dump: print the entire content of the PST named by WLM2PST_DUMP_PST",
+          "[.dump]") {
+    wchar_t buf[2048] = {};
+    DWORD n = GetEnvironmentVariableW(L"WLM2PST_DUMP_PST", buf, 2048);
+    if (n == 0 || n >= 2048) {
+        SKIP("Set the WLM2PST_DUMP_PST environment variable to the PST path to dump.");
+    }
+    std::wstring pst_path(buf, n);
+
+    auto raw = reopen_raw(pst_path);
+    REQUIRE(raw.ok());
+    IMsgStore& store = *raw.value()->store->store();
+
+    // IPM subtree entry id straight from the store.
+    SizedSPropTagArray(1, tags) = {1, {PR_IPM_SUBTREE_ENTRYID}};
+    ULONG count = 0;
+    LPSPropValue values = nullptr;
+    HRESULT hr = store.GetProps(reinterpret_cast<LPSPropTagArray>(&tags), 0, &count, &values);
+    mapi::MapiBuffer guard(raw.value()->runtime.MAPIFreeBuffer);
+    *guard.put() = values;
+    REQUIRE((SUCCEEDED(hr) && count > 0 && PROP_TYPE(values[0].ulPropTag) == PT_BINARY));
+    EntryId subtree(values[0].Value.bin.lpb, values[0].Value.bin.lpb + values[0].Value.bin.cb);
+
+    std::vector<std::pair<EntryId, std::wstring>> stack{{subtree, L""}};
+    while (!stack.empty()) {
+        auto [folder_id, path] = std::move(stack.back());
+        stack.pop_back();
+
+        auto folder = raw.value()->store->open_folder(folder_id);
+        REQUIRE(folder.ok());
+
+        auto messages = read_raw_message_props(raw.value()->runtime, store,
+                                               *folder.value().get());
+        REQUIRE(messages.ok());
+        std::printf("=== folder '%s' : %zu message(s)\n",
+                    utf8_from_wide(path.empty() ? L"<ipm-subtree>" : path).c_str(),
+                    messages.value().size());
+        for (const auto& m : messages.value()) {
+            std::printf("  - %s\n", render_raw(m).c_str());
+        }
+
+        mapi::MapiPtr<IMAPITable> hierarchy;
+        hr = folder.value()->GetHierarchyTable(0, hierarchy.put());
+        REQUIRE(SUCCEEDED(hr));
+        enum { kColEid, kColName, kColCount };
+        SizedSPropTagArray(kColCount, cols) = {kColCount, {PR_ENTRYID, PR_DISPLAY_NAME_W}};
+        REQUIRE(SUCCEEDED(hierarchy->SetColumns(reinterpret_cast<LPSPropTagArray>(&cols), 0)));
+        for (;;) {
+            LPSRowSet rows = nullptr;
+            REQUIRE(SUCCEEDED(hierarchy->QueryRows(64, 0, &rows)));
+            mapi::RowSetGuard row_guard(rows, raw.value()->runtime.MAPIFreeBuffer);
+            if (!rows || rows->cRows == 0) break;
+            for (ULONG i = 0; i < rows->cRows; ++i) {
+                const SPropValue* p = rows->aRow[i].lpProps;
+                if (PROP_TYPE(p[kColEid].ulPropTag) != PT_BINARY) continue;
+                std::wstring name = PROP_TYPE(p[kColName].ulPropTag) == PT_UNICODE
+                                        ? p[kColName].Value.lpszW
+                                        : L"?";
+                stack.emplace_back(
+                    EntryId(p[kColEid].Value.bin.lpb,
+                            p[kColEid].Value.bin.lpb + p[kColEid].Value.bin.cb),
+                    path.empty() ? name : path + L"\\" + name);
+            }
+        }
+    }
+    SUCCEED("dump complete");
 }
 
 #endif  // _WIN32

@@ -5,9 +5,10 @@
 - **Visual Studio 2022 (v17)** with the "Desktop development with C++"
   workload. The CMake presets use the `Visual Studio 17 2022` generator.
 - **Windows 10 or Windows 11 SDK**, installed as part of the VS 2022
-  workload above. The Windows SDK ships the Extended MAPI headers WLM2PST
-  needs (`mapidefs.h`, `mapitags.h`, `mapix.h`, `mapiutil.h`, `mapiguid.h`)
-  — no separate MAPI SDK download is required.
+  workload above. Note: **current Windows SDKs do NOT ship the Extended MAPI
+  headers** (verified missing in SDK 10.0.26100.0) — the build handles this
+  automatically with a vendored copy; see "Extended MAPI headers" below. No
+  separate MAPI SDK download is required either way.
 - **CMake >= 3.21** (bundled with recent VS 2022 installs, or install
   separately and make sure it is on `PATH`).
 - Production builds only target Windows; there is no Linux/macOS production
@@ -16,10 +17,26 @@
 Everything else the build needs — SQLite, and Catch2 when tests are enabled
 — is either vendored or fetched automatically as described below.
 
-## MAPI headers and version-specific gaps
+## Extended MAPI headers
 
-The Windows SDK's Extended MAPI header set is not perfectly uniform across
-SDK versions and toolchains — most notably, `IMsgServiceAdmin2` (needed for
+Current Windows SDKs (e.g. 10.0.26100.0, installed with today's VS 2022) do
+**not** contain the Extended MAPI headers (`mapidefs.h`, `mapix.h`,
+`mapitags.h`, `mapiutil.h`, `mapiguid.h`); older SDKs did. The build resolves
+this in [`cmake/wlm2pst_mapi_headers.cmake`](cmake/wlm2pst_mapi_headers.cmake):
+
+1. If the active SDK/toolchain provides `mapidefs.h` (MinGW-w64 does, and
+   older Windows SDKs did), it is used as-is.
+2. Otherwise the build falls back to the vendored copy of Microsoft's own
+   header set from the [MAPIStubLibrary](https://github.com/microsoft/MAPIStubLibrary)
+   project (MIT), under `third_party/mapi/include/`.
+3. `-DWLM2PST_MAPI_HEADERS_DIR=<path>` overrides both.
+
+No action is needed for a normal build — the fallback is automatic.
+
+## MAPI header version-specific gaps
+
+Even where the headers exist, the set is not perfectly uniform across
+versions — most notably, `IMsgServiceAdmin2` (needed for
 `CreateMsgServiceEx`) is not guaranteed to be declared everywhere, and
 `mapiaux.h` is not present in every header set. WLM2PST does not require a
 newer or non-standard header set to work around this: everything the tool

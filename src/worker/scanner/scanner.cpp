@@ -6,6 +6,8 @@
 // enforce per level).
 #include "worker/scanner/scanner.h"
 
+#include "common/paths/path_utils.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -191,7 +193,15 @@ struct PendingDir {
 
 Result<ScanResult> scan_source_tree(const ScanOptions& options, IFileSystemProbe& probe) {
     try {
-        fs::path root_path = to_fs_path(options.source_root);
+        std::wstring root_wide = options.source_root;
+#ifdef _WIN32
+        // Extended-length prefix so traversal (and every derived child path)
+        // works past MAX_PATH regardless of the machine-wide
+        // FileSystem\LongPathsEnabled policy. Real WLM archives contain
+        // deeply nested trees with paths well over 255 characters.
+        root_wide = to_extended_length_path(std::move(root_wide));
+#endif
+        fs::path root_path = to_fs_path(root_wide);
 
         std::error_code root_ec;
         fs::file_status root_status = fs::status(root_path, root_ec);
