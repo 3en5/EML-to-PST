@@ -54,6 +54,10 @@ enum class ValidationStatus {
 
 const char* to_string(ValidationStatus status) noexcept;
 
+// Folder receiving unconvertible messages (spec section 16). Centralized here
+// so the portable pipeline and the MAPI layer share one definition.
+inline constexpr const wchar_t* kConversionErrorsFolderName = L"_Conversion Errors";
+
 // A folder rename applied during normalization (spec section 9); reported.
 struct RenamedFolder {
     std::wstring source_relative_folder;

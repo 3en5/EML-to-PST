@@ -121,7 +121,8 @@ inline constexpr const wchar_t* kPropSourceLastWriteUtc = L"Wlm2Pst.SourceLastWr
 // ---------------------------------------------------------------------------
 
 inline constexpr const wchar_t* kFallbackMessageClass = L"IPM.Note";
-inline constexpr const wchar_t* kConversionErrorsFolder = L"_Conversion Errors";
+// The "_Conversion Errors" folder name lives in common/model.h
+// (kConversionErrorsFolderName) so the portable pipeline shares it.
 
 // PR_MESSAGE_FLAGS bits (mapidefs.h provides MSGFLAG_* on both toolchains,
 // listed here for the reader): MSGFLAG_READ 0x1, MSGFLAG_UNSENT 0x8,
