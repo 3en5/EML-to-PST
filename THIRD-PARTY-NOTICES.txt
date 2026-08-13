@@ -1,0 +1,42 @@
+WLM2PST - Third-Party Notices
+================================
+
+This product includes the following third-party software.
+
+--------------------------------------------------------------------------
+SQLite
+--------------------------------------------------------------------------
+Version:  3.38.2 (amalgamation: sqlite3.c / sqlite3.h)
+License:  Public domain
+Usage:    Vendored under third_party/sqlite/ and compiled into WLM2PST as
+          the static library wlm2pst_sqlite. Used exclusively to implement
+          the local crash-safe resume state database
+          (<output>.wlm2pst-state.sqlite) written beside each converted
+          PST. Distributed as part of the WLM2PST binaries.
+
+The SQLite authors have dedicated the SQLite source code to the public
+domain and disclaim copyright interest in it, so that it may be used
+freely for any purpose, commercial or non-commercial. See
+https://sqlite.org/copyright.html for the full statement. The public-domain
+text is also included in this package as LICENSES\SQLITE.txt.
+
+--------------------------------------------------------------------------
+Catch2
+--------------------------------------------------------------------------
+License:  Boost Software License 1.0 (BSL-1.0)
+Usage:    Test-only dependency used to build and run WLM2PST's unit test
+          suite (tests/unit/). Catch2 is NOT linked into, embedded in, or
+          otherwise distributed as part of the wlm2pst.exe,
+          wlm2pst-worker-x86.exe, or wlm2pst-worker-x64.exe binaries, and
+          is not included in the packaged distribution.
+
+See https://github.com/catchorg/Catch2/blob/devel/LICENSE.txt for the full
+license text.
+
+--------------------------------------------------------------------------
+
+No other third-party source code, libraries, or binaries are used by
+WLM2PST. In particular, no Microsoft Outlook or Extended MAPI binaries are
+included in or redistributed with this package - classic Outlook must
+already be installed on the machine that runs WLM2PST, and its DLLs are
+loaded from that existing installation at runtime only.
