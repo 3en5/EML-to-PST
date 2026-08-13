@@ -66,6 +66,11 @@ inline constexpr CLSID kClsidIConverterSession =
 inline constexpr IID kIidIConverterSession =
     {0x4b401570, 0xb77b, 0x11d0, {0x9d, 0xa5, 0x00, 0xc0, 0x4f, 0xd6, 0x56, 0x85}};
 
+// IID_IMsgServiceAdmin2 (OLEGUID 0x00020387). Defined locally because SDK
+// headers only declare it extern and no import library provides the symbol.
+inline constexpr IID kIidIMsgServiceAdmin2 =
+    {0x00020387, 0x0000, 0x0000, {0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+
 // CCSF_* conversion flags (Microsoft documented values).
 inline constexpr ULONG kCcsfSmtp = 0x0002;            // treat as SMTP/MIME message
 inline constexpr ULONG kCcsfIncludeBcc = 0x0020;      // preserve BCC when present

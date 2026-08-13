@@ -80,7 +80,7 @@ Result<MAPIUID> TemporaryProfile::create_pst_service(IMsgServiceAdmin& svc_admin
     // directly and races with nothing.
     HRESULT hr = S_OK;
     MapiPtr<IMsgServiceAdmin2> svc_admin2;
-    if (SUCCEEDED(svc_admin.QueryInterface(IID_IMsgServiceAdmin2, svc_admin2.put_void()))) {
+    if (SUCCEEDED(svc_admin.QueryInterface(kIidIMsgServiceAdmin2, svc_admin2.put_void()))) {
         hr = svc_admin2->CreateMsgServiceEx(ansi_arg(service_name), ansi_arg(service_display),
                                             0, 0, &service_uid);
         if (FAILED(hr)) {
