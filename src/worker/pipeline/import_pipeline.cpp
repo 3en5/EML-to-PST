@@ -8,10 +8,12 @@
 #include "worker/folder_mapping/folder_aliases.h"
 #include "worker/headers/header_inspector.h"
 
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <optional>
+#include <string_view>
 
 namespace wlm2pst {
 
@@ -91,7 +93,11 @@ DateFallback resolve_sent_fallback(const HeaderInspection& headers,
 bool is_systemic_operation(const std::string& operation) {
     return operation == "IMessage::SaveChanges" || operation == "IMessage::SaveChanges(fallback)" ||
            operation == "IMAPIFolder::CreateMessage" || operation == "IMsgStore::OpenEntry(folder)" ||
-           operation == "IMAPIFolder::CreateFolder";
+           operation == "IMAPIFolder::CreateFolder" ||
+           // A run of integrity failures means the converter is not
+           // converting at all - stop instead of preserving thousands of
+           // messages as fallback attachments (spec section 23).
+           operation == "conversion_integrity";
 }
 
 class PipelineRun {
@@ -210,6 +216,17 @@ private:
         bool is_draft = headers.x_unsent() || path_has_drafts_component(row.relative_source_path);
         bool is_sent = !is_draft && path_has_sent_component(row.relative_source_path);
 
+        // Conversion-integrity expectations (what the source itself declares;
+        // the MAPI layer refuses to persist a message that lost them).
+        bool declared_subject = headers.first_value("Subject").has_value();
+        bool multipart_mixed = false;
+        if (auto content_type = headers.first_value("Content-Type")) {
+            static constexpr std::string_view kMixed = "multipart/mixed";
+            std::string lowered = *content_type;
+            for (char& c : lowered) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            multipart_mixed = lowered.rfind(kMixed, 0) == 0;
+        }
+
         MessageMetadata metadata;
         metadata.source_relative_path = row.relative_source_path;
         metadata.sha256_hex = sha_hex;
@@ -220,6 +237,8 @@ private:
         metadata.mark_sent = is_sent;
         metadata.mark_draft = is_draft;
         metadata.now_utc = now;
+        metadata.source_declared_subject = declared_subject;
+        metadata.source_multipart_mixed = multipart_mixed;
 
         bool fallback_from_fs = false;
         if (is_sent) {

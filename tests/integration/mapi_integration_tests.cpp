@@ -122,6 +122,10 @@ MessageMetadata make_metadata(const std::wstring& relative_path, const std::wstr
     m.mark_sent = mark_sent;
     m.mark_draft = mark_draft;
     m.now_utc = filetime_from_unix_seconds(static_cast<int64_t>(std::time(nullptr)));
+    // Every fixture these scenarios import declares a Subject, so enable the
+    // conversion-integrity gate: a converter that does not really convert
+    // now fails the import instead of producing silently corrupt output.
+    m.source_declared_subject = true;
     return m;
 }
 

@@ -4,6 +4,7 @@
 #include "common/errors/result.h"
 #include "worker/mapi/mapi_constants.h"
 #include "worker/mapi/mapi_raii.h"
+#include "worker/mapi/mapi_runtime.h"
 
 #include <string>
 
@@ -43,8 +44,13 @@ public:
     MimeConverter(MimeConverter&&) = default;
     MimeConverter& operator=(MimeConverter&&) = default;
 
-    // CoCreateInstance of Outlook's converter (requires COM + MAPI up).
-    static Result<MimeConverter> create();
+    // Obtains Outlook's converter (requires COM + MAPI up):
+    // CoCreateInstance first; on Click-to-Run installs (class not in the
+    // ordinary registry) the dll registered in the C2R virtual hive via
+    // DllGetClassObject; finally the loaded MAPI module itself. Correctness
+    // of whatever is obtained is enforced separately by
+    // run_converter_self_test() during preflight.
+    static Result<MimeConverter> create(MapiRuntime& runtime);
 
     // MIMEToMAPI with CCSF_SMTP | CCSF_INCLUDE_BCC | CCSF_GLOBAL_MESSAGE,
     // retrying without CCSF_GLOBAL_MESSAGE for Outlook versions that reject

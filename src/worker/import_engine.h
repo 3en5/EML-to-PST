@@ -32,6 +32,11 @@ struct MessageMetadata {
     bool mark_sent = false;              // sent-folder alias matched
     bool mark_draft = false;             // X-Unsent or drafts-folder alias
     FileTimeUtc now_utc = 0;             // for converter-date sanity bounds (spec section 13)
+    // Conversion-integrity expectations derived from the source headers: a
+    // converted message must not silently lose what the source declared
+    // (guards against a non-converting IConverterSession implementation).
+    bool source_declared_subject = false;  // "Subject:" present in source
+    bool source_multipart_mixed = false;   // Content-Type: multipart/mixed
     // Date fallbacks, already resolved by the pipeline (spec section 13):
     // applied only when the converter produced no valid corresponding value.
     std::optional<FileTimeUtc> fallback_message_delivery_time;

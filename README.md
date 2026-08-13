@@ -44,6 +44,19 @@ implement, and will not add:
   mail — the tool preserves content, it does not vet it.
 - Modification of any source `.eml` file, ever.
 
+## Requirements
+
+- Windows 10 or Windows 11.
+- **Classic Outlook** with Extended MAPI (see the next section; New Outlook
+  is not supported).
+- **Microsoft Visual C++ Redistributable** (x86 *and* x64 — the launcher is
+  32-bit, the worker may be 64-bit). The binaries link the dynamic CRT
+  (`/MD`); most machines with Office already have the redistributable. A
+  missing-DLL error at startup (`VCRUNTIME140.dll` or similar) means it
+  needs installing from Microsoft.
+- No administrator privileges, no network access, and no configured mail
+  account are required.
+
 ## Classic Outlook requirement
 
 WLM2PST drives classic Outlook's installed Extended MAPI implementation and

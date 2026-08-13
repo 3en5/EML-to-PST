@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed (second verification round)
+
+- **Critical: silently corrupt output on Click-to-Run.** The previous C2R
+  fallback guessed `OUTLMIME.DLL` by name; that dll hands out an
+  `IConverterSession` which reports success without converting — a full run
+  of 2,178 messages produced a PST whose messages had no subject, the raw
+  EML as body, and no attachments, while validation PASSED (see
+  `docs/verification/2026-08-13-c2r-converter-still-broken.md`). Three-layer
+  fix:
+  1. The converter is now obtained the way MFCMAPI does it: from the dll
+     registered in the Click-to-Run virtual registry hive
+     (`...\ClickToRun\REGISTRY\MACHINE\Software\Classes\CLSID\{...}\InprocServer32`),
+     falling back to the loaded Outlook MAPI module — never a guessed dll.
+  2. **Preflight converter self-test**: a bundled synthetic message (RFC 2047
+     Hebrew subject, UTF-8 Hebrew body, one attachment) is converted into a
+     throwaway PST before any real work; unless subject, decoded body, and
+     exactly one attachment all come back, the run aborts with a clear error
+     instead of writing an unusable archive.
+  3. **Per-message conversion-integrity gate**: a source that declares a
+     `Subject:` must yield a subject; a `multipart/mixed` source must yield
+     at least one attachment. Violations route the message into the
+     normalized-retry / preserve-as-attachment path, and a run of them trips
+     the circuit breaker.
+
 First verification round on real Windows (MSVC + classic Outlook,
 Microsoft 365 Click-to-Run).
 
