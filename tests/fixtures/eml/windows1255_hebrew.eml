@@ -1,0 +1,10 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: Windows-1255 Hebrew fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-004@example.invalid>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=windows-1255
+Content-Transfer-Encoding: 8bit
+
+שלום עולם - synthetic Hebrew test body.

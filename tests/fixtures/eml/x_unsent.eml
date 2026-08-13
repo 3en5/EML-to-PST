@@ -1,0 +1,11 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: X-Unsent draft fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-020@example.invalid>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+X-Unsent: 1
+
+Body text for the X-Unsent draft fixture.

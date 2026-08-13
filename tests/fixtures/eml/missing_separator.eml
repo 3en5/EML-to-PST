@@ -1,0 +1,5 @@
+From: test-sender@example.invalid
+Subject: Missing separator fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-023@example.invalid>
+This is the body text with no header/body separator at all.
