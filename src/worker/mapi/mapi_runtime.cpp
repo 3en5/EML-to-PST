@@ -82,8 +82,10 @@ Status MapiRuntime::load() {
                                 "classic Outlook Extended MAPI could not be loaded");
     }
 
-    auto resolve = [this](const char* name) -> FARPROC {
-        return GetProcAddress(module_, name);
+    // Cast through void* to satisfy -Wcast-function-type: FARPROC's generic
+    // signature differs from every real entry point by design.
+    auto resolve = [this](const char* name) -> void* {
+        return reinterpret_cast<void*>(GetProcAddress(module_, name));
     };
     mapi_initialize_ = reinterpret_cast<LPMAPIINITIALIZE>(resolve("MAPIInitialize"));
     mapi_uninitialize_ = reinterpret_cast<LPMAPIUNINITIALIZE>(resolve("MAPIUninitialize"));
