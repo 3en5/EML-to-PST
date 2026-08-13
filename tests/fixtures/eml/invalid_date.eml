@@ -1,0 +1,10 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: Invalid Date fixture
+Date: Sun, 30 Feb 2020 10:00:00 +0000
+Message-ID: <fixture-018@example.invalid>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Body text for the invalid-Date (February 30th does not exist) fixture.

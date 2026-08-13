@@ -1,0 +1,11 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: UTF-8 plain text fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-001@example.invalid>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Hello, this is a synthetic plain-text UTF-8 test message.
+It includes accented characters: café, résumé, naïve.

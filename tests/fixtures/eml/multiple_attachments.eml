@@ -1,0 +1,33 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: Multiple attachments fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-013@example.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="fixture-boundary-013"
+
+This is a MIME multipart message.
+--fixture-boundary-013
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Body text for the multiple-attachments fixture.
+--fixture-boundary-013
+Content-Type: text/plain; name="a.txt"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="a.txt"
+
+U3ludGhldGljIGF0dGFjaG1lbnQgQSBjb250ZW50LiBTeW50aGV0aWMgYXR0YWNobWVudCBBIGNv
+bnRlbnQuIFN5bnRoZXRpYyBhdHRhY2htZW50IEEgY29udGVudC4gU3ludGhldGljIGF0dGFjaG1l
+bnQgQSBjb250ZW50LiBTeW50aGV0aWMgYXR0YWNobWVudCBBIGNvbnRlbnQuIA==
+--fixture-boundary-013
+Content-Type: application/octet-stream; name="b.bin"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="b.bin"
+
+U3ludGhldGljIGF0dGFjaG1lbnQgQiBjb250ZW50LCBkaWZmZXJlbnQgYnl0ZXMuIFN5bnRoZXRp
+YyBhdHRhY2htZW50IEIgY29udGVudCwgZGlmZmVyZW50IGJ5dGVzLiBTeW50aGV0aWMgYXR0YWNo
+bWVudCBCIGNvbnRlbnQsIGRpZmZlcmVudCBieXRlcy4gU3ludGhldGljIGF0dGFjaG1lbnQgQiBj
+b250ZW50LCBkaWZmZXJlbnQgYnl0ZXMuIFN5bnRoZXRpYyBhdHRhY2htZW50IEIgY29udGVudCwg
+ZGlmZmVyZW50IGJ5dGVzLiA=
+--fixture-boundary-013--

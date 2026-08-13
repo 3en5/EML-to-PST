@@ -1,0 +1,10 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: UTF-8 HTML fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-002@example.invalid>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+<html><body><p>Hello, this is a synthetic <b>HTML</b> UTF-8 test message.</p><p>Accented characters: café, résumé.</p></body></html>

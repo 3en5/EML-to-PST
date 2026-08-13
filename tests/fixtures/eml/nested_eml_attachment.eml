@@ -1,0 +1,29 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: Nested EML attachment fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-014@example.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="fixture-boundary-014"
+
+This is a MIME multipart message.
+--fixture-boundary-014
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Body text for the nested-EML-attachment fixture; an entire EML is attached below.
+--fixture-boundary-014
+Content-Type: message/rfc822; name="inner.eml"
+Content-Disposition: attachment; filename="inner.eml"
+
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: Inner nested message
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-141@example.invalid>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+This is the body of the inner, nested EML message.
+--fixture-boundary-014--

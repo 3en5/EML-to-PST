@@ -1,0 +1,13 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: Multiple Received headers fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-019@example.invalid>
+MIME-Version: 1.0
+Received: from mx1.example.invalid by mx2.example.invalid; Tue, 01 Jul 2003 10:52:30 +0200
+Received: from mx2.example.invalid by mx3.example.invalid; Tue, 01 Jul 2003 10:52:33 +0200
+Received: from mx3.example.invalid by mx4.example.invalid; Tue, 01 Jul 2003 10:52:37 +0200
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Body text for the multiple-Received-headers fixture.

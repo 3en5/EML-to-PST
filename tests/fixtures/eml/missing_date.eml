@@ -1,0 +1,9 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: Missing Date fixture
+Message-ID: <fixture-017@example.invalid>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Body text for the missing-Date fixture.

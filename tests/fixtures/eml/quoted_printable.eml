@@ -1,0 +1,11 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: Quoted-printable fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-006@example.invalid>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+This is a quoted-printable test with an =3D equals sign and a soft=
+line break, plus an encoded caf=C3=A9.

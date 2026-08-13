@@ -1,0 +1,25 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: Single attachment fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-012@example.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="fixture-boundary-012"
+
+This is a MIME multipart message.
+--fixture-boundary-012
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Body text for the single-attachment fixture.
+--fixture-boundary-012
+Content-Type: text/plain; name="notes.txt"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="notes.txt"
+
+U3ludGhldGljIHNpbmdsZS1hdHRhY2htZW50IGNvbnRlbnQsIGEgZmV3IGh1bmRyZWQgYnl0ZXMg
+bG9uZy4gU3ludGhldGljIHNpbmdsZS1hdHRhY2htZW50IGNvbnRlbnQsIGEgZmV3IGh1bmRyZWQg
+Ynl0ZXMgbG9uZy4gU3ludGhldGljIHNpbmdsZS1hdHRhY2htZW50IGNvbnRlbnQsIGEgZmV3IGh1
+bmRyZWQgYnl0ZXMgbG9uZy4gU3ludGhldGljIHNpbmdsZS1hdHRhY2htZW50IGNvbnRlbnQsIGEg
+ZmV3IGh1bmRyZWQgYnl0ZXMgbG9uZy4g
+--fixture-boundary-012--
