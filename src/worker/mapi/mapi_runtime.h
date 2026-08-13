@@ -34,6 +34,13 @@ public:
 
     [[nodiscard]] bool loaded() const noexcept { return module_ != nullptr; }
     [[nodiscard]] const std::wstring& dll_path() const noexcept { return dll_path_; }
+    [[nodiscard]] HMODULE module() const noexcept { return module_; }
+
+    // Locates the MAPI DLL path via the mail-client registration (both
+    // registry views), falling back to the system stub. Public because the
+    // MIME converter needs the same DLL when Outlook's COM classes are not
+    // registry-visible (Click-to-Run); see mime_converter.cpp.
+    static std::wstring resolve_mapi_dll_path();
 
     // Resolved entry points (valid after load() succeeds).
     LPMAPILOGONEX MAPILogonEx = nullptr;
@@ -43,10 +50,6 @@ public:
     LPMAPIFREEBUFFER MAPIFreeBuffer = nullptr;
 
 private:
-    // Locates the MAPI DLL path via the mail-client registration (both
-    // registry views), falling back to the system stub.
-    static std::wstring resolve_mapi_dll_path();
-
     HMODULE module_ = nullptr;
     std::wstring dll_path_;
     bool initialized_ = false;

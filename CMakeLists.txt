@@ -22,6 +22,9 @@ if(WIN32)
 endif()
 
 include(cmake/wlm2pst_flags.cmake)
+if(WIN32)
+    include(cmake/wlm2pst_mapi_headers.cmake)
+endif()
 
 add_subdirectory(third_party/sqlite)
 add_subdirectory(src)

@@ -252,13 +252,22 @@ TEST_CASE("scanner computes folder_count over distinct ancestor dirs with eml at
 TEST_CASE("scanner enforces max_depth: too-deep dirs are not traversed, too-deep files are excluded",
           "[scanner]") {
     TempDir root;
-    fs::path cur = root.path();
+#ifdef _WIN32
+    // Build the deep tree through an extended-length path so the TEST SETUP
+    // does not depend on the machine-wide LongPathsEnabled policy. The
+    // scanner itself applies the same \\?\ prefix internally, so the
+    // scan-under-test needs no special handling.
+    fs::path setup_root = fs::path(L"\\\\?\\" + fs::absolute(root.path()).wstring());
+#else
+    fs::path setup_root = root.path();
+#endif
+    fs::path cur = setup_root;
     for (int i = 1; i <= 101; ++i) {
         cur = cur / wpath(L"L" + std::to_wstring(i));
         fs::create_directories(cur);
     }
 
-    fs::path l100 = root.path();
+    fs::path l100 = setup_root;
     for (int i = 1; i <= 100; ++i) l100 = l100 / wpath(L"L" + std::to_wstring(i));
     write_file(l100, L"atL100.eml");   // file depth 101: too deep, excluded
     write_file(cur, L"insideL101.eml");  // inside a dir that itself is too deep: never visited

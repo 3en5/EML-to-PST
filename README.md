@@ -57,6 +57,12 @@ still exposes MAPI) is required on the machine that runs the conversion. No
 mail account needs to be configured in it — WLM2PST creates and uses its own
 temporary MAPI profile.
 
+The machine also needs the **Microsoft Visual C++ Redistributable (x86 and
+x64)** matching the build's toolset — the release binaries link the dynamic
+CRT (`/MD`). Most machines with Office already have it; if the tool fails to
+start with a missing-DLL error (`VCRUNTIME140.dll` or similar), install the
+redistributable from Microsoft.
+
 ## Bitness behavior
 
 Extended MAPI requires the calling process's bitness to match the installed
@@ -192,6 +198,10 @@ intentionally contains the original filename, by design — see spec section
   timestamps or folder location — it marks everything read on import.
 - The filesystem folder tree is the source of truth; WLM2PST does not read
   `Mail.MSMessageStore` or any other Windows Live Mail database.
+- Source paths longer than 260 characters are supported without any
+  machine-wide policy change: the scanner and every per-file open use
+  extended-length (`\\?\`) paths internally, so deeply nested Windows Live
+  Mail trees convert even when `LongPathsEnabled` is off.
 - Windows Live Mail's Inbox/Sent/Drafts are not special-cased into Outlook's
   built-in folders — they are recreated as ordinary folders under the tool
   root, matched only by name for sent/draft *flag* behavior.
