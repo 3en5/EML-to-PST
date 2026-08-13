@@ -50,4 +50,14 @@ Result<bool> apply_date_policy(IMessage& message, MapiRuntime& runtime,
 FILETIME filetime_from_ticks(FileTimeUtc ticks) noexcept;
 FileTimeUtc ticks_from_filetime(const FILETIME& ft) noexcept;
 
+// Conversion-integrity gate (defence against a converter that reports
+// success without converting - observed on Click-to-Run when the wrong dll
+// serves IConverterSession). Fails when the source declared a Subject but
+// the converted message has none, or the source was multipart/mixed but the
+// message has an empty attachment table. A failure routes the message into
+// the normalized-retry / preserve-as-attachment path instead of persisting
+// silently corrupt output.
+Status verify_conversion_integrity(IMessage& message, MapiRuntime& runtime,
+                                   const MessageMetadata& metadata);
+
 }  // namespace wlm2pst::mapi

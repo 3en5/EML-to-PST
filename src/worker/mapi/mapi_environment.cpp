@@ -2,6 +2,7 @@
 // IPstSession (spec sections 8, 10, 15, 16, 17, 20).
 #include "worker/import_engine.h"
 
+#include "common/logging/logger.h"
 #include "common/unicode/utf.h"
 #include "common/version/version.h"
 #include "worker/mapi/mapi_constants.h"
@@ -12,7 +13,10 @@
 #include "worker/mapi/pst_store.h"
 #include "worker/mapi/temporary_profile.h"
 
+#include <ole2.h>
+
 #include <algorithm>
+#include <cstring>
 #include <map>
 #include <sstream>
 
@@ -77,6 +81,10 @@ public:
         if (!folder_ptr.ok()) return folder_ptr.error();
 
         ImportFailure failure;
+        // The last attempt's error is returned as-is so its operation name
+        // (e.g. "conversion_integrity") stays visible to the pipeline's
+        // circuit breaker and error reporting.
+        Error last_error = make_error("MIMEToMAPI", "conversion not attempted");
 
         // Attempt 1: the original, unmodified bytes (spec section 16).
         {
@@ -84,6 +92,7 @@ public:
                                                     metadata, false);
             if (attempt.ok()) return std::move(attempt.value());
             failure.first_hresult = attempt.error().hresult;
+            last_error = attempt.error();
         }
 
         // Attempt 2: conservative normalized copy in a secure temp file.
@@ -94,12 +103,12 @@ public:
                                                     normalized.value().path(), metadata, true);
             if (attempt.ok()) return std::move(attempt.value());
             failure.second_hresult = attempt.error().hresult;
+            last_error = attempt.error();
         }
 
         if (failure_detail) *failure_detail = failure;
-        return make_hresult_error(
-            failure.second_attempted ? failure.second_hresult : failure.first_hresult,
-            "MIMEToMAPI", "both conversion attempts failed");
+        last_error.message = "both conversion attempts failed: " + last_error.message;
+        return last_error;
     }
 
     Result<ImportOutcome> import_fallback(const EntryId& errors_folder,
@@ -316,7 +325,7 @@ public:
 private:
     Status ensure_converter() {
         if (converter_) return Status::success();
-        auto conv = MimeConverter::create();
+        auto conv = MimeConverter::create(*runtime_);
         if (!conv.ok()) return conv.error();
         converter_ = std::make_unique<MimeConverter>(std::move(conv.value()));
         return Status::success();
@@ -337,6 +346,13 @@ private:
 
         if (Status s = converter_->convert(*stream.value().get(), msg); !s.ok()) {
             // Unsaved message is discarded when released; nothing persists.
+            return s.error();
+        }
+
+        // Refuse to persist a message the converter did not actually convert
+        // (guards the Click-to-Run acquisition paths; a failure here routes
+        // into the normalized-retry / preserve-as-attachment path).
+        if (Status s = verify_conversion_integrity(msg, *runtime_, metadata); !s.ok()) {
             return s.error();
         }
 
@@ -432,6 +448,153 @@ private:
     bool closed_ = false;
 };
 
+// ---------------------------------------------------------------------------
+// Converter self-test (preflight): converts a bundled synthetic message with
+// an RFC 2047 Hebrew subject, a UTF-8 Hebrew body, and one attachment into a
+// throwaway PST, then verifies all three survived. A converter that
+// instantiates but does not convert (observed with a wrongly-guessed dll on
+// Click-to-Run) is caught HERE, before a single real message is written.
+// ---------------------------------------------------------------------------
+
+// Subject decodes to "WLM2PST self-test שלום".
+constexpr char kSelfTestEml[] =
+    "From: selftest@wlm2pst.invalid\r\n"
+    "To: selftest@wlm2pst.invalid\r\n"
+    "Subject: =?UTF-8?B?V0xNMlBTVCBzZWxmLXRlc3Qg16nXnNeV150=?=\r\n"
+    "Date: Tue, 01 Jul 2003 10:52:37 +0200\r\n"
+    "Message-ID: <selftest@wlm2pst.invalid>\r\n"
+    "MIME-Version: 1.0\r\n"
+    "Content-Type: multipart/mixed; boundary=\"wlm2pst-selftest\"\r\n"
+    "\r\n"
+    "--wlm2pst-selftest\r\n"
+    "Content-Type: text/plain; charset=utf-8\r\n"
+    "Content-Transfer-Encoding: 8bit\r\n"
+    "\r\n"
+    "WLM2PST converter self-test body \xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D"
+    " \xD7\xA2\xD7\x95\xD7\x9C\xD7\x9D\r\n"
+    "--wlm2pst-selftest\r\n"
+    "Content-Type: application/octet-stream\r\n"
+    "Content-Disposition: attachment; filename=\"selftest.bin\"\r\n"
+    "Content-Transfer-Encoding: base64\r\n"
+    "\r\n"
+    "AAECAwQFBgc=\r\n"
+    "--wlm2pst-selftest--\r\n";
+
+Status run_converter_self_test(MapiRuntime& runtime) {
+    // Throwaway PST under %TEMP%; removed unconditionally at the end.
+    wchar_t temp_dir[MAX_PATH + 1] = {};
+    DWORD n = GetTempPathW(MAX_PATH + 1, temp_dir);
+    if (n == 0 || n > MAX_PATH) {
+        return make_win32_error(GetLastError(), "GetTempPathW");
+    }
+    std::wstring pst_path = std::wstring(temp_dir) + L"wlm2pst-selftest-" +
+                            wide_from_utf8(new_guid_string()) + L".pst";
+
+    Status result = Status::success();
+    {
+        auto profile = TemporaryProfile::create(runtime, "WLM2PST-");
+        if (!profile.ok()) return profile.error();
+
+        auto run = [&]() -> Status {
+            if (Status s = profile.value()->add_unicode_pst_service(pst_path, L"WLM2PST SelfTest");
+                !s.ok()) {
+                return s;
+            }
+            auto store = PstStore::logon_and_open(runtime, profile.value()->name());
+            if (!store.ok()) return store.error();
+
+            auto root = store.value()->ensure_root_folder(L"SelfTest");
+            if (!root.ok()) { store.value()->close(); return root.error(); }
+            auto folder = store.value()->open_folder(root.value());
+            if (!folder.ok()) { store.value()->close(); return folder.error(); }
+            auto message = store.value()->create_message(*folder.value().get());
+            if (!message.ok()) { store.value()->close(); return message.error(); }
+            IMessage& msg = *message.value().get();
+
+            auto converter = MimeConverter::create(runtime);
+            if (!converter.ok()) { store.value()->close(); return converter.error(); }
+
+            // In-memory stream over the bundled fixture.
+            MapiPtr<IStream> stream;
+            HRESULT hr = CreateStreamOnHGlobal(nullptr, TRUE, stream.put());
+            if (FAILED(hr)) {
+                store.value()->close();
+                return make_hresult_error(static_cast<int32_t>(hr), "CreateStreamOnHGlobal");
+            }
+            ULONG written = 0;
+            hr = stream->Write(kSelfTestEml, static_cast<ULONG>(sizeof(kSelfTestEml) - 1),
+                               &written);
+            if (FAILED(hr) || written != sizeof(kSelfTestEml) - 1) {
+                store.value()->close();
+                return make_hresult_error(static_cast<int32_t>(hr), "IStream::Write");
+            }
+            if (Status s = converter.value().convert(*stream.get(), msg); !s.ok()) {
+                store.value()->close();
+                return s;
+            }
+
+            // Judge the outcome: subject decoded, body decoded, one attachment.
+            MessageMetadata expectations;
+            expectations.source_declared_subject = true;
+            expectations.source_multipart_mixed = true;
+            Status integrity = verify_conversion_integrity(msg, runtime, expectations);
+            if (!integrity.ok()) {
+                store.value()->close();
+                return make_error(
+                    "converter_self_test",
+                    "the MIME converter instantiates but does not convert (" +
+                        integrity.error().message +
+                        "); refusing to run rather than write an unusable PST. "
+                        "This occurs when Outlook's converter class cannot be obtained "
+                        "correctly (Click-to-Run registration).");
+            }
+
+            // Content checks: RFC 2047 subject decoding and UTF-8 body text
+            // must actually survive (fixture text only; never user content).
+            auto prop_contains = [&](ULONG tag, const wchar_t* needle,
+                                     const char* what) -> Status {
+                SizedSPropTagArray(1, tags) = {1, {tag}};
+                ULONG count = 0;
+                LPSPropValue values = nullptr;
+                HRESULT phr = msg.GetProps(reinterpret_cast<LPSPropTagArray>(&tags), 0,
+                                           &count, &values);
+                MapiBuffer prop_guard(runtime.MAPIFreeBuffer);
+                *prop_guard.put() = values;
+                bool ok = !FAILED(phr) && count > 0 &&
+                          PROP_TYPE(values[0].ulPropTag) == PT_UNICODE &&
+                          std::wstring_view(values[0].Value.lpszW).find(needle) !=
+                              std::wstring_view::npos;
+                if (!ok) {
+                    return make_error("converter_self_test",
+                                      std::string(what) +
+                                          " did not survive conversion; refusing to run "
+                                          "rather than write an unusable PST");
+                }
+                return Status::success();
+            };
+            if (Status s = prop_contains(PR_SUBJECT_W, L"שלום", "RFC 2047 encoded subject");
+                !s.ok()) {
+                store.value()->close();
+                return s;
+            }
+            if (Status s = prop_contains(PR_BODY_W, L"שלום עולם", "UTF-8 body text");
+                !s.ok()) {
+                store.value()->close();
+                return s;
+            }
+            store.value()->close();
+            return Status::success();
+        };
+        result = run();
+        (void)profile.value()->remove();
+    }
+    DeleteFileW(pst_path.c_str());
+    if (result.ok()) {
+        global_logger().info("MIME converter self-test passed (subject, body, attachment)");
+    }
+    return result;
+}
+
 class MapiEnvironment final : public IMapiEnvironment {
 public:
     ~MapiEnvironment() override {
@@ -442,17 +605,17 @@ public:
     Status preflight_check() override {
         if (Status s = ensure_ready(); !s.ok()) return s;
 
-        // MIME converter can be instantiated (spec section 6).
-        auto conv = MimeConverter::create();
-        if (!conv.ok()) return conv.error();
-
         // Temporary profile round-trip + Unicode PST provider availability.
         auto profile = TemporaryProfile::create(runtime_, "WLM2PST-");
         if (!profile.ok()) return profile.error();
         Status probe = profile.value()->probe_unicode_pst_service();
         Status removal = profile.value()->remove();  // never leave the probe behind
         if (!probe.ok()) return probe;
-        return removal;
+        if (!removal.ok()) return removal;
+
+        // MIME converter must not merely instantiate - it must CONVERT
+        // (spec section 6 strengthened after the Click-to-Run field failure).
+        return run_converter_self_test(runtime_);
     }
 
     Result<std::unique_ptr<IPstSession>> create_session(

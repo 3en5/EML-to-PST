@@ -152,6 +152,37 @@ bool filetime_in_bounds(FileTimeUtc value, FileTimeUtc now_utc) {
 
 }  // namespace
 
+Status verify_conversion_integrity(IMessage& message, MapiRuntime& runtime,
+                                   const MessageMetadata& metadata) {
+    if (metadata.source_declared_subject) {
+        MapiBuffer keep_alive;
+        auto subject = read_prop(message, runtime, PR_SUBJECT_W, keep_alive);
+        bool ok = subject && PROP_TYPE(subject->ulPropTag) == PT_UNICODE &&
+                  subject->Value.lpszW != nullptr && subject->Value.lpszW[0] != L'\0';
+        if (!ok) {
+            return make_error("conversion_integrity",
+                              "source declared a Subject but the converted message has none "
+                              "(converter did not actually convert)");
+        }
+    }
+    if (metadata.source_multipart_mixed) {
+        MapiPtr<IMAPITable> attachments;
+        HRESULT hr = message.GetAttachmentTable(0, attachments.put());
+        if (FAILED(hr)) {
+            return make_hresult_error(static_cast<int32_t>(hr), "conversion_integrity",
+                                      "attachment table unreadable after conversion");
+        }
+        ULONG rows = 0;
+        hr = attachments->GetRowCount(0, &rows);
+        if (FAILED(hr) || rows == 0) {
+            return make_error("conversion_integrity",
+                              "source is multipart/mixed but the converted message has no "
+                              "attachments (converter did not actually convert)");
+        }
+    }
+    return Status::success();
+}
+
 Result<bool> apply_date_policy(IMessage& message, MapiRuntime& runtime,
                                const MessageMetadata& metadata) {
     bool fallback_applied = false;

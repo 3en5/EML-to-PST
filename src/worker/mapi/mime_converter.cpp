@@ -7,6 +7,8 @@
 
 #include <shlwapi.h>
 
+#include <algorithm>
+
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -118,36 +120,62 @@ std::wstring read_registry_string(HKEY root, const wchar_t* key, const wchar_t* 
         }
     }
     RegCloseKey(handle);
+    if (type == REG_EXPAND_SZ && !result.empty()) {
+        wchar_t expanded[1024] = {};
+        DWORD n = ExpandEnvironmentStringsW(result.c_str(), expanded,
+                                            static_cast<DWORD>(std::size(expanded)));
+        if (n > 0 && n <= std::size(expanded)) result.assign(expanded);
+    }
     return result;
 }
 
-// Outlook's MIME converter lives in OUTLMIME.DLL, next to OUTLOOK.EXE.
-std::wstring resolve_outlmime_path() {
-    static constexpr const wchar_t* kAppPathsOutlook =
-        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\OUTLOOK.EXE";
-    for (REGSAM view : {REGSAM{0}, REGSAM{KEY_WOW64_64KEY}, REGSAM{KEY_WOW64_32KEY}}) {
-        std::wstring exe = read_registry_string(HKEY_LOCAL_MACHINE, kAppPathsOutlook, L"", view);
-        if (exe.empty()) continue;
-        const size_t slash = exe.find_last_of(L"\\/");
-        if (slash == std::wstring::npos) continue;
-        std::wstring candidate = exe.substr(0, slash + 1) + L"OUTLMIME.DLL";
-        if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) return candidate;
-    }
-    return L"OUTLMIME.DLL";  // let the loader search; better than giving up
+// Click-to-Run Office does not publish Outlook's COM classes in the ordinary
+// registry (CoCreateInstance -> REGDB_E_CLASSNOTREG on a healthy install).
+// It DOES publish them in its virtualized registry hive, mirrored for
+// outside processes under:
+//   HKLM\SOFTWARE\Microsoft\Office\ClickToRun\REGISTRY\MACHINE\Software\Classes
+// The supported workaround (this is what MFCMAPI's MyCoCreateInstance does)
+// is to read the class's InprocServer32 from that hive and ask THAT dll for
+// the class factory via DllGetClassObject.
+//
+// History note: an earlier fallback guessed OUTLMIME.DLL by name. That dll
+// hands out an object which accepts MIMEToMAPI and reports success WITHOUT
+// converting (raw EML text becomes the body, no subject, no attachments) -
+// verified against a real C2R installation. Never guess the dll; only load
+// what the C2R hive registers, and let the preflight self-test be the final
+// judge (see run_converter_self_test).
+std::wstring clsid_to_string(REFCLSID clsid) {
+    wchar_t buf[64] = {};
+    std::swprintf(buf, std::size(buf),
+                  L"{%08lX-%04hX-%04hX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX}",
+                  static_cast<unsigned long>(clsid.Data1), clsid.Data2, clsid.Data3,
+                  clsid.Data4[0], clsid.Data4[1], clsid.Data4[2], clsid.Data4[3],
+                  clsid.Data4[4], clsid.Data4[5], clsid.Data4[6], clsid.Data4[7]);
+    return buf;
 }
 
-// Click-to-Run Office does not publish Outlook's COM classes in the ordinary
-// registry, so CoCreateInstance(CLSID_IConverterSession) returns
-// REGDB_E_CLASSNOTREG on an otherwise healthy classic Outlook install
-// (observed on Microsoft 365 / ProPlusRetail C2R, Office16). The implementing
-// DLL still exports DllGetClassObject, so ask it for the class factory
-// directly - the same fallback MFCMAPI relies on. Verified empirically:
-// MSMAPI32/OLMAPI32 return CLASS_E_CLASSNOTAVAILABLE for this CLSID, and
-// OUTLMIME.DLL is the module that actually serves it.
-HRESULT create_converter_via_outlook_dll(REFCLSID clsid, REFIID iid, void** out,
-                                         std::wstring& used_dll) {
-    const std::wstring dll = resolve_outlmime_path();
-    used_dll = dll;
+std::vector<std::wstring> c2r_inproc_server_candidates(REFCLSID clsid) {
+    const std::wstring id = clsid_to_string(clsid);
+    const std::wstring hive = L"SOFTWARE\\Microsoft\\Office\\ClickToRun\\REGISTRY\\MACHINE\\"
+                              L"Software\\Classes";
+    const std::wstring keys[] = {
+        hive + L"\\CLSID\\" + id + L"\\InprocServer32",
+        hive + L"\\Wow6432Node\\CLSID\\" + id + L"\\InprocServer32",
+    };
+    std::vector<std::wstring> candidates;
+    for (const auto& key : keys) {
+        for (REGSAM view : {REGSAM{0}, REGSAM{KEY_WOW64_64KEY}, REGSAM{KEY_WOW64_32KEY}}) {
+            std::wstring dll = read_registry_string(HKEY_LOCAL_MACHINE, key.c_str(), L"", view);
+            if (dll.empty()) continue;
+            if (std::find(candidates.begin(), candidates.end(), dll) == candidates.end()) {
+                candidates.push_back(std::move(dll));
+            }
+        }
+    }
+    return candidates;
+}
+
+HRESULT create_from_dll(const std::wstring& dll, REFCLSID clsid, REFIID iid, void** out) {
     HMODULE mod = GetModuleHandleW(dll.c_str());
     if (!mod) {
         mod = LoadLibraryExW(dll.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -166,29 +194,63 @@ HRESULT create_converter_via_outlook_dll(REFCLSID clsid, REFIID iid, void** out,
 
 }  // namespace
 
-Result<MimeConverter> MimeConverter::create() {
+Result<MimeConverter> MimeConverter::create(MapiRuntime& runtime) {
     MimeConverter converter;
     HRESULT hr = CoCreateInstance(kClsidIConverterSession, nullptr, CLSCTX_INPROC_SERVER,
                                   kIidIConverterSession, converter.session_.put_void());
     if (SUCCEEDED(hr)) {
-        // Which path served the converter matters for field diagnosis (the
-        // C2R fallback is the prime suspect whenever converted content looks
-        // wrong); DLL paths are operational data, never message content.
-        global_logger().verbose("MIME converter acquired via CoCreateInstance (registry COM)");
-    } else if (hr == REGDB_E_CLASSNOTREG || hr == CLASS_E_CLASSNOTAVAILABLE) {
-        std::wstring used_dll;
-        hr = create_converter_via_outlook_dll(kClsidIConverterSession, kIidIConverterSession,
-                                              converter.session_.put_void(), used_dll);
-        if (SUCCEEDED(hr)) {
-            global_logger().verbose("MIME converter acquired via DllGetClassObject fallback: " +
-                                    utf8_from_wide(used_dll));
-        }
+        // Which path served the converter matters for field diagnosis; DLL
+        // paths are operational data, never message content.
+        global_logger().info("MIME converter acquired via CoCreateInstance (registry COM)");
+        return converter;
     }
-    if (FAILED(hr)) {
+    if (hr != REGDB_E_CLASSNOTREG && hr != CLASS_E_CLASSNOTAVAILABLE) {
         return make_hresult_error(static_cast<int32_t>(hr), "CoCreateInstance(IConverterSession)",
                                   "Outlook MIME converter unavailable");
     }
-    return converter;
+
+    // Click-to-Run route: the dll registered in the C2R virtual hive.
+    HRESULT last_hr = hr;
+    for (const std::wstring& dll : c2r_inproc_server_candidates(kClsidIConverterSession)) {
+        hr = create_from_dll(dll, kClsidIConverterSession, kIidIConverterSession,
+                             converter.session_.put_void());
+        if (SUCCEEDED(hr)) {
+            global_logger().info("MIME converter acquired via C2R hive InprocServer32: " +
+                                 utf8_from_wide(dll));
+            return converter;
+        }
+        global_logger().verbose("C2R hive candidate rejected (" + utf8_from_wide(dll) +
+                                "): hr=" + std::to_string(hr));
+        last_hr = hr;
+    }
+
+    // Last resort: the already-loaded Outlook MAPI module itself. Never
+    // guess further dlls by name - a wrong module can hand out an object
+    // that "succeeds" without converting (see history note above); the
+    // preflight self-test still gates whatever this returns.
+    if (runtime.module()) {
+        using DllGetClassObjectFn = HRESULT(STDAPICALLTYPE*)(REFCLSID, REFIID, void**);
+        auto get_class_object = reinterpret_cast<DllGetClassObjectFn>(reinterpret_cast<void*>(
+            GetProcAddress(runtime.module(), "DllGetClassObject")));
+        if (get_class_object) {
+            MapiPtr<IClassFactory> factory;
+            hr = get_class_object(kClsidIConverterSession, IID_IClassFactory, factory.put_void());
+            if (SUCCEEDED(hr)) {
+                hr = factory->CreateInstance(nullptr, kIidIConverterSession,
+                                             converter.session_.put_void());
+                if (SUCCEEDED(hr)) {
+                    global_logger().info("MIME converter acquired via loaded MAPI module: " +
+                                         utf8_from_wide(runtime.dll_path()));
+                    return converter;
+                }
+            }
+            last_hr = hr;
+        }
+    }
+
+    return make_hresult_error(static_cast<int32_t>(last_hr), "CoCreateInstance(IConverterSession)",
+                              "Outlook MIME converter unavailable (COM registration not found, "
+                              "no working C2R hive registration)");
 }
 
 Status MimeConverter::convert(IStream& eml, IMessage& message) {

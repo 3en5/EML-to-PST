@@ -126,6 +126,23 @@ const char* kNoDateEml =
     "\r\n"
     "body\r\n";
 
+const char* kMultipartMixedEml =
+    "From: a@example.invalid\r\n"
+    "Subject: with attachment\r\n"
+    "Date: Tue, 01 Jul 2003 10:52:37 +0200\r\n"
+    "MIME-Version: 1.0\r\n"
+    "Content-Type: Multipart/Mixed; boundary=\"b1\"\r\n"
+    "\r\n"
+    "--b1\r\n"
+    "Content-Type: text/plain\r\n\r\nhello\r\n"
+    "--b1--\r\n";
+
+const char* kNoSubjectEml =
+    "From: a@example.invalid\r\n"
+    "Date: Tue, 01 Jul 2003 10:52:37 +0200\r\n"
+    "\r\n"
+    "body\r\n";
+
 }  // namespace
 
 TEST_CASE("pipeline imports pending files and records state", "[pipeline]") {
@@ -281,6 +298,50 @@ TEST_CASE("sent and draft folder aliases drive message metadata", "[pipeline]") 
     CHECK(checked_sent);
     CHECK(checked_draft);
     CHECK(checked_inbox);
+}
+
+TEST_CASE("conversion-integrity expectations are derived from source headers", "[pipeline]") {
+    PipelineHarness h({{L"plain.eml", kSimpleEml},
+                       {L"mixed.eml", kMultipartMixedEml},
+                       {L"nosubject.eml", kNoSubjectEml}});
+    auto result = run_import_pipeline(h.ctx);
+    REQUIRE(result.ok());
+    REQUIRE(result.value().counters.imported_normally == 3);
+
+    int checked = 0;
+    for (auto& [key, folder] : h.session.folders()) {
+        for (auto& msg : folder.messages) {
+            if (msg.metadata.source_relative_path == L"plain.eml") {
+                CHECK(msg.metadata.source_declared_subject);
+                CHECK_FALSE(msg.metadata.source_multipart_mixed);
+                ++checked;
+            } else if (msg.metadata.source_relative_path == L"mixed.eml") {
+                CHECK(msg.metadata.source_declared_subject);
+                CHECK(msg.metadata.source_multipart_mixed);  // case-insensitive match
+                ++checked;
+            } else if (msg.metadata.source_relative_path == L"nosubject.eml") {
+                CHECK_FALSE(msg.metadata.source_declared_subject);
+                ++checked;
+            }
+        }
+    }
+    CHECK(checked == 3);
+}
+
+TEST_CASE("repeated conversion-integrity failures trip the circuit breaker", "[pipeline]") {
+    std::vector<std::pair<std::wstring, std::string>> files;
+    for (int i = 0; i < 15; ++i) {
+        files.emplace_back(L"f" + std::to_wstring(i) + L".eml", kSimpleEml);
+    }
+    PipelineHarness h(files);
+    for (const auto& [rel, _] : files) h.session.fail_convert.insert(rel);
+    h.session.convert_fail_operation = "conversion_integrity";
+    h.session.fallback_fail_operation = "IMessage::SaveChanges(fallback)";
+
+    auto result = run_import_pipeline(h.ctx);
+    REQUIRE(result.ok());
+    REQUIRE(result.value().fatal.has_value());
+    CHECK(result.value().fatal->exit_code == ExitCode::kOutputWriteFailure);
 }
 
 TEST_CASE("filesystem date fallback produces a warning", "[pipeline][dates]") {
