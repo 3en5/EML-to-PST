@@ -1,5 +1,6 @@
 #include "worker/mapi/mime_converter.h"
 
+#include "worker/mapi/mapi_runtime.h"
 #include "worker/normalize/eml_normalizer.h"
 
 #include <shlwapi.h>
@@ -93,10 +94,82 @@ Result<TempFile> write_normalized_copy(const std::wstring& source_path) {
     return std::move(temp.value());
 }
 
+namespace {
+
+std::wstring read_registry_string(HKEY root, const wchar_t* key, const wchar_t* value,
+                                  REGSAM view) {
+    HKEY handle = nullptr;
+    if (RegOpenKeyExW(root, key, 0, KEY_QUERY_VALUE | view, &handle) != ERROR_SUCCESS) {
+        return {};
+    }
+    DWORD type = 0;
+    DWORD bytes = 0;
+    std::wstring result;
+    if (RegQueryValueExW(handle, value, nullptr, &type, nullptr, &bytes) == ERROR_SUCCESS &&
+        (type == REG_SZ || type == REG_EXPAND_SZ) && bytes >= sizeof(wchar_t)) {
+        result.resize(bytes / sizeof(wchar_t));
+        if (RegQueryValueExW(handle, value, nullptr, nullptr,
+                             reinterpret_cast<LPBYTE>(result.data()), &bytes) != ERROR_SUCCESS) {
+            result.clear();
+        } else {
+            while (!result.empty() && result.back() == L'\0') result.pop_back();
+        }
+    }
+    RegCloseKey(handle);
+    return result;
+}
+
+// Outlook's MIME converter lives in OUTLMIME.DLL, next to OUTLOOK.EXE.
+std::wstring resolve_outlmime_path() {
+    static constexpr const wchar_t* kAppPathsOutlook =
+        L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\OUTLOOK.EXE";
+    for (REGSAM view : {REGSAM{0}, REGSAM{KEY_WOW64_64KEY}, REGSAM{KEY_WOW64_32KEY}}) {
+        std::wstring exe = read_registry_string(HKEY_LOCAL_MACHINE, kAppPathsOutlook, L"", view);
+        if (exe.empty()) continue;
+        const size_t slash = exe.find_last_of(L"\\/");
+        if (slash == std::wstring::npos) continue;
+        std::wstring candidate = exe.substr(0, slash + 1) + L"OUTLMIME.DLL";
+        if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) return candidate;
+    }
+    return L"OUTLMIME.DLL";  // let the loader search; better than giving up
+}
+
+// Click-to-Run Office does not publish Outlook's COM classes in the ordinary
+// registry, so CoCreateInstance(CLSID_IConverterSession) returns
+// REGDB_E_CLASSNOTREG on an otherwise healthy classic Outlook install
+// (observed on Microsoft 365 / ProPlusRetail C2R, Office16). The implementing
+// DLL still exports DllGetClassObject, so ask it for the class factory
+// directly - the same fallback MFCMAPI relies on. Verified empirically:
+// MSMAPI32/OLMAPI32 return CLASS_E_CLASSNOTAVAILABLE for this CLSID, and
+// OUTLMIME.DLL is the module that actually serves it.
+HRESULT create_converter_via_outlook_dll(REFCLSID clsid, REFIID iid, void** out) {
+    const std::wstring dll = resolve_outlmime_path();
+    HMODULE mod = GetModuleHandleW(dll.c_str());
+    if (!mod) {
+        mod = LoadLibraryExW(dll.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (!mod) return HRESULT_FROM_WIN32(GetLastError());
+    }
+    using DllGetClassObjectFn = HRESULT(STDAPICALLTYPE*)(REFCLSID, REFIID, void**);
+    auto get_class_object = reinterpret_cast<DllGetClassObjectFn>(
+        reinterpret_cast<void*>(GetProcAddress(mod, "DllGetClassObject")));
+    if (!get_class_object) return REGDB_E_CLASSNOTREG;
+
+    MapiPtr<IClassFactory> factory;
+    HRESULT hr = get_class_object(clsid, IID_IClassFactory, factory.put_void());
+    if (FAILED(hr)) return hr;
+    return factory->CreateInstance(nullptr, iid, out);
+}
+
+}  // namespace
+
 Result<MimeConverter> MimeConverter::create() {
     MimeConverter converter;
     HRESULT hr = CoCreateInstance(kClsidIConverterSession, nullptr, CLSCTX_INPROC_SERVER,
                                   kIidIConverterSession, converter.session_.put_void());
+    if (hr == REGDB_E_CLASSNOTREG || hr == CLASS_E_CLASSNOTAVAILABLE) {
+        hr = create_converter_via_outlook_dll(kClsidIConverterSession, kIidIConverterSession,
+                                              converter.session_.put_void());
+    }
     if (FAILED(hr)) {
         return make_hresult_error(static_cast<int32_t>(hr), "CoCreateInstance(IConverterSession)",
                                   "Outlook MIME converter unavailable");

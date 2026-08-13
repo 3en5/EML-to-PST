@@ -587,7 +587,7 @@ TEST_CASE("9: fallback preserves the original EML as an unchanged attachment",
     {
         auto session = env->create_session(pst_path, L"Windows Live Mail", false, "convert");
         REQUIRE(session.ok());
-        auto folder = session.value()->ensure_folder({std::wstring(mapi::kConversionErrorsFolder)});
+        auto folder = session.value()->ensure_folder({std::wstring(kConversionErrorsFolderName)});
         REQUIRE(folder.ok());
         errors_folder = folder.value();
 
@@ -737,7 +737,7 @@ TEST_CASE("11: find_tracked_messages recovers an import across a simulated crash
 // and x64 worker test binaries in CI to cover both).
 // ---------------------------------------------------------------------------
 TEST_CASE("12: x86 worker matches a 32-bit classic Outlook installation", "[.outlook][mapi]") {
-    if (sizeof(void*) != 4) {
+    if constexpr (sizeof(void*) != 4) {
         SKIP("This test binary is not the 32-bit worker build; run the x86 build to exercise "
              "this scenario.");
     }
@@ -747,7 +747,7 @@ TEST_CASE("12: x86 worker matches a 32-bit classic Outlook installation", "[.out
 }
 
 TEST_CASE("13: x64 worker matches a 64-bit classic Outlook installation", "[.outlook][mapi]") {
-    if (sizeof(void*) != 8) {
+    if constexpr (sizeof(void*) != 8) {
         SKIP("This test binary is not the 64-bit worker build; run the x64 build to exercise "
              "this scenario.");
     }
