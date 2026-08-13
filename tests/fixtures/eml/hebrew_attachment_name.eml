@@ -1,0 +1,22 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: Hebrew attachment filename fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-009@example.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="fixture-boundary-009"
+
+This is a MIME multipart message.
+--fixture-boundary-009
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Body text for the Hebrew-attachment-name fixture.
+--fixture-boundary-009
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename*=UTF-8''%D7%9E%D7%A1%D7%9E%D7%9A.txt; filename="=?UTF-8?B?157Xodee15oudHh0?="
+
+U3ludGhldGljIGF0dGFjaG1lbnQgY29udGVudCByZWZlcmVuY2VkIGJ5IGEgSGVicmV3IGZpbGVu
+YW1lLg0K
+--fixture-boundary-009--

@@ -1,0 +1,23 @@
+From: test-sender@example.invalid
+To: test-recipient@example.invalid
+Subject: Inline CID image fixture
+Date: Tue, 01 Jul 2003 10:52:37 +0200
+Message-ID: <fixture-011@example.invalid>
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="fixture-boundary-011"; type="text/html"
+
+This is a MIME multipart message.
+--fixture-boundary-011
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+<html><body><p>Inline image below:</p><img src="cid:tinyimage001@example.invalid"></body></html>
+--fixture-boundary-011
+Content-Type: image/png; name="tiny.png"
+Content-Transfer-Encoding: base64
+Content-ID: <tinyimage001@example.invalid>
+Content-Disposition: inline; filename="tiny.png"
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mP4z8AAAAMBAQD3A0FD
+AAAAAElFTkSuQmCC
+--fixture-boundary-011--
