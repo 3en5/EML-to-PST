@@ -10,6 +10,7 @@
 #include "worker/mapi/mapi_runtime.h"
 #include "worker/mapi/message_properties.h"
 #include "worker/mapi/mime_converter.h"
+#include "worker/mapi/mimeole_importer.h"
 #include "worker/mapi/pst_store.h"
 #include "worker/mapi/temporary_profile.h"
 
@@ -329,7 +330,13 @@ public:
 
 private:
     Status ensure_converter() {
-        if (converter_) return Status::success();
+        if (converter_ || mimeole_) return Status::success();
+        if (converter_config_.use_mimeole) {
+            auto importer = MimeOleImporter::create();
+            if (!importer.ok()) return importer.error();
+            mimeole_ = std::make_unique<MimeOleImporter>(std::move(importer.value()));
+            return Status::success();
+        }
         auto conv = MimeConverter::create(*runtime_);
         if (!conv.ok()) return conv.error();
         auto converter = std::make_unique<MimeConverter>(std::move(conv.value()));
@@ -367,10 +374,12 @@ private:
         if (!message.ok()) return message.error();
         IMessage& msg = *message.value().get();
 
-        if (Status s = converter_->convert(*stream.value().get(), msg, converter_config_.flags);
-            !s.ok()) {
+        Status converted = mimeole_
+            ? mimeole_->import(*stream.value().get(), msg, *runtime_)
+            : converter_->convert(*stream.value().get(), msg, converter_config_.flags);
+        if (!converted.ok()) {
             // Unsaved message is discarded when released; nothing persists.
-            return s.error();
+            return converted.error();
         }
 
         // Flags and dates must be right before the FIRST save (spec section 12).
@@ -483,6 +492,7 @@ private:
     ConverterConfig converter_config_;
     MapiPtr<IAddrBook> adr_book_;
     std::unique_ptr<MimeConverter> converter_;
+    std::unique_ptr<MimeOleImporter> mimeole_;
     std::map<std::wstring, EntryId> folder_cache_;
     bool closed_ = false;
 };
@@ -797,10 +807,54 @@ Result<ConverterConfig> run_converter_calibration(MapiRuntime& runtime) {
                 global_logger().info("self-test variant rejected: " + label + " - " +
                                      judged.error().message);
             }
+            // Final engine: Windows' own MimeOle parser (inetcomm.dll) - the
+            // engine that wrote these EML files in the first place. Same
+            // content judges apply; no engine ships unverified.
+            {
+                std::string label = "engine=mimeole";
+                auto importer = MimeOleImporter::create();
+                if (!importer.ok()) {
+                    diagnostics += " [" + label + ": " + importer.error().operation + "]";
+                } else {
+                    auto message = store.value()->create_message(*folder.value().get());
+                    if (!message.ok()) { store_close(); return message.error(); }
+                    Status imported = importer.value().import(*stream.get(),
+                                                              *message.value().get(), runtime);
+                    if (!imported.ok()) {
+                        diagnostics += " [" + label + ": " + imported.error().operation + " " +
+                                       imported.error().message + "]";
+                    } else {
+                        Status judged = judge_self_test_message(*message.value().get(), runtime);
+                        if (!judged.ok()) {
+                            HRESULT save_hr = message.value()->SaveChanges(KEEP_OPEN_READWRITE);
+                            if (SUCCEEDED(save_hr)) {
+                                judged = judge_self_test_message(*message.value().get(), runtime);
+                            }
+                        }
+                        if (judged.ok()) {
+                            global_logger().info(
+                                "MIME converter calibrated: engine=MimeOle (Windows inetcomm) - "
+                                "subject, body, attachment verified");
+                            store_close();
+                            ConverterConfig config;
+                            config.use_address_book = false;
+                            config.flags = 0;
+                            config.use_mimeole = true;
+                            return config;
+                        }
+                        global_logger().info("self-test " + label + " state: " +
+                                             describe_converted_message(*message.value().get(),
+                                                                        runtime));
+                        diagnostics += " [" + label + ": " + judged.error().message + "]";
+                    }
+                }
+            }
+
             store_close();
             return make_error(
                 "converter_self_test",
-                "no converter configuration actually converts; refusing to run rather than "
+                "no conversion engine actually converts (Outlook IConverterSession and "
+                "Windows MimeOle both failed verification); refusing to run rather than "
                 "write an unusable PST. Variant results:" + diagnostics);
         };
         result = run();
