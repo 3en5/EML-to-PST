@@ -26,11 +26,12 @@ if(MSVC)
     target_compile_options(wlm2pst_tests PRIVATE /wd4324)
 endif()
 
-# The scanner depth test builds a 48-level directory tree, which needs the same
-# longPathAware manifest the shipped binaries carry (packaging/wlm2pst.manifest).
-# Without it the test fails in its own setup on Windows rather than testing the
-# scanner. Note this still additionally requires the machine-wide
-# FileSystem\LongPathsEnabled=1 policy to take effect.
+# The scanner depth test builds a 48-level directory tree; the test binary
+# carries the same longPathAware manifest as the shipped binaries
+# (packaging/wlm2pst.manifest). The machine-wide LongPathsEnabled policy is
+# NOT required: the test builds its tree through an extended-length (\\?\)
+# path and the scanner applies the same prefix internally (field-verified
+# with the policy off).
 wlm2pst_configure_windows_exe(wlm2pst_tests "wlm2pst_tests" "WLM2PST unit tests")
 foreach(lib wlm2pst_worker_core wlm2pst_launcher_core)
     if(TARGET ${lib})
