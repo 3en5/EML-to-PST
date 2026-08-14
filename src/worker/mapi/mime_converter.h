@@ -36,6 +36,18 @@ private:
 // when normalization has nothing to change (caller then skips attempt 2).
 Result<TempFile> write_normalized_copy(const std::wstring& source_path);
 
+// How the converter is driven. The working combination differs between
+// Outlook installations (field finding: on Click-to-Run, a converter used
+// per Microsoft's "Importing MIME email" sample sequence including
+// SetAdrBook converts correctly, while a bare object degraded to
+// treat-stream-as-text). The preflight self-test CALIBRATES this: it tries
+// the variants in a fixed order against a bundled fixture with full content
+// checks, and the first one that provably converts is used for the run.
+struct ConverterConfig {
+    bool use_address_book = true;  // IMAPISession::OpenAddressBook + SetAdrBook
+    ULONG flags = kCcsfSmtp | kCcsfIncludeBcc | kCcsfGlobalMessage;
+};
+
 class MimeConverter {
 public:
     MimeConverter() = default;
@@ -48,14 +60,18 @@ public:
     // CoCreateInstance first; on Click-to-Run installs (class not in the
     // ordinary registry) the dll registered in the C2R virtual hive via
     // DllGetClassObject; finally the loaded MAPI module itself. Correctness
-    // of whatever is obtained is enforced separately by
-    // run_converter_self_test() during preflight.
+    // of whatever is obtained is enforced separately by the preflight
+    // self-test/calibration and the per-message integrity gate.
     static Result<MimeConverter> create(MapiRuntime& runtime);
 
-    // MIMEToMAPI with CCSF_SMTP | CCSF_INCLUDE_BCC | CCSF_GLOBAL_MESSAGE,
-    // retrying without CCSF_GLOBAL_MESSAGE for Outlook versions that reject
-    // the flag (spec sections 10, 33.16).
-    Status convert(IStream& eml, IMessage& message);
+    // Attaches the session's address book (Microsoft's documented import
+    // sequence calls this before MIMEToMAPI; MFCMAPI does likewise).
+    Status set_address_book(LPADRBOOK address_book);
+
+    // MIMEToMAPI with the given CCSF flags. The exact HRESULT is logged when
+    // it is not plain S_OK (field diagnosis: a converter can "succeed"
+    // without converting; the integrity gate is the behavioral arbiter).
+    Status convert(IStream& eml, IMessage& message, ULONG flags);
 
 private:
     MapiPtr<IConverterSession> session_;

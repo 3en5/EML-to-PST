@@ -253,31 +253,32 @@ Result<MimeConverter> MimeConverter::create(MapiRuntime& runtime) {
                               "no working C2R hive registration)");
 }
 
-Status MimeConverter::convert(IStream& eml, IMessage& message) {
-    // CCSF_GLOBAL_MESSAGE enables international (EAI) header handling on
-    // Outlook 2010+; older converters reject unknown flags, so retry without
-    // it (spec sections 10, 33.16). Rewind the stream before each attempt.
-    const ULONG flag_sets[] = {
-        kCcsfSmtp | kCcsfIncludeBcc | kCcsfGlobalMessage,
-        kCcsfSmtp | kCcsfIncludeBcc,
-    };
-    HRESULT last_hr = E_FAIL;
-    for (ULONG flags : flag_sets) {
-        LARGE_INTEGER zero{};
-        HRESULT hr = eml.Seek(zero, STREAM_SEEK_SET, nullptr);
-        if (FAILED(hr)) {
-            return make_hresult_error(static_cast<int32_t>(hr), "IStream::Seek");
-        }
-        hr = session_->MIMEToMAPI(&eml, &message, nullptr, flags);
-        if (SUCCEEDED(hr)) {
-            return Status::success();
-        }
-        last_hr = hr;
-        if (hr != E_INVALIDARG && hr != MAPI_E_UNKNOWN_FLAGS) {
-            break;  // real conversion failure; dropping flags will not help
-        }
+Status MimeConverter::set_address_book(LPADRBOOK address_book) {
+    HRESULT hr = session_->SetAdrBook(address_book);
+    if (FAILED(hr)) {
+        return make_hresult_error(static_cast<int32_t>(hr), "IConverterSession::SetAdrBook");
     }
-    return make_hresult_error(static_cast<int32_t>(last_hr), "IConverterSession::MIMEToMAPI");
+    return Status::success();
+}
+
+Status MimeConverter::convert(IStream& eml, IMessage& message, ULONG flags) {
+    LARGE_INTEGER zero{};
+    HRESULT hr = eml.Seek(zero, STREAM_SEEK_SET, nullptr);
+    if (FAILED(hr)) {
+        return make_hresult_error(static_cast<int32_t>(hr), "IStream::Seek");
+    }
+    hr = session_->MIMEToMAPI(&eml, &message, nullptr, flags);
+    if (FAILED(hr)) {
+        return make_hresult_error(static_cast<int32_t>(hr), "IConverterSession::MIMEToMAPI");
+    }
+    if (hr != S_OK) {
+        // SUCCEEDED but not S_OK (e.g. S_FALSE): accepted, but recorded -
+        // the per-message integrity gate is the behavioral arbiter.
+        global_logger().info("MIMEToMAPI returned non-S_OK success: 0x" +
+                             [hr] { char b[16]; std::snprintf(b, sizeof(b), "%08X",
+                                    static_cast<uint32_t>(hr)); return std::string(b); }());
+    }
+    return Status::success();
 }
 
 }  // namespace wlm2pst::mapi

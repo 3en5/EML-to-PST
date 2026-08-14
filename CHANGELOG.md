@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed (third verification round)
+
+- **Converter driven per Microsoft's documented import sequence.** Field
+  round 3 proved acquisition was never the variable (the C2R hive resolves
+  to the same OUTLMIME.DLL): the object was alive but degraded to
+  treat-stream-as-text. The missing piece: `SetAdrBook` — called by
+  Microsoft's "Importing MIME email" sample and MFCMAPI before `MIMEToMAPI`,
+  never called by WLM2PST. The session's address book is now attached
+  (`IMAPISession::OpenAddressBook` + `SetAdrBook`) before converting.
+- **Preflight self-test upgraded to calibration.** It now tries driving
+  variants in a fixed order (address book on/off × three CCSF flag levels)
+  against the bundled fixture with full content checks; the first variant
+  that provably converts is locked in for the whole run and logged. If none
+  converts, the run still refuses loudly — now with per-variant diagnostics
+  in the error text.
+- `MIMEToMAPI` results other than plain `S_OK` are now logged (`S_FALSE`
+  cannot masquerade as silent success; the per-message integrity gate
+  remains the behavioral arbiter).
+
 ### Fixed (second verification round)
 
 - **Critical: silently corrupt output on Click-to-Run.** The previous C2R
