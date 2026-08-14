@@ -373,13 +373,6 @@ private:
             return s.error();
         }
 
-        // Refuse to persist a message the converter did not actually convert
-        // (guards the Click-to-Run acquisition paths; a failure here routes
-        // into the normalized-retry / preserve-as-attachment path).
-        if (Status s = verify_conversion_integrity(msg, *runtime_, metadata); !s.ok()) {
-            return s.error();
-        }
-
         // Flags and dates must be right before the FIRST save (spec section 12).
         if (Status s = apply_message_state(msg, *runtime_, metadata.mark_sent,
                                            metadata.mark_draft); !s.ok()) {
@@ -395,6 +388,26 @@ private:
         }
         auto entry_id = store_->message_entry_id(msg);
         if (!entry_id.ok()) return entry_id.error();
+
+        // Conversion-integrity gate AFTER the save (field finding, round 4:
+        // MIMEToMAPI reports MAPI_W_PARTIAL_COMPLETION and some property
+        // writes may only materialize at SaveChanges). On violation the
+        // just-saved message is deleted so nothing corrupt persists, and the
+        // failure routes into the normalized-retry / preserve path.
+        if (Status s = verify_conversion_integrity(msg, *runtime_, metadata); !s.ok()) {
+            SBinary doomed_bin{};
+            doomed_bin.cb = static_cast<ULONG>(entry_id.value().size());
+            doomed_bin.lpb = const_cast<LPBYTE>(entry_id.value().data());
+            ENTRYLIST doomed{};
+            doomed.cValues = 1;
+            doomed.lpbin = &doomed_bin;
+            HRESULT del_hr = folder.DeleteMessages(&doomed, 0, nullptr, 0);
+            if (FAILED(del_hr)) {
+                global_logger().warn("integrity-failed message could not be deleted (hr=" +
+                                     std::to_string(del_hr) + "); validation will flag it");
+            }
+            return s.error();
+        }
 
         ImportOutcome outcome;
         outcome.entry_id = std::move(entry_id.value());
@@ -506,6 +519,89 @@ constexpr char kSelfTestEml[] =
     "AAECAwQFBgc=\r\n"
     "--wlm2pst-selftest--\r\n";
 
+// Post-mortem of a converted message: which properties actually landed,
+// subject in both widths, body head, recipient/attachment counts. Used only
+// on the SELF-TEST fixture (synthetic content), so logging it is safe. This
+// turns MAPI_W_PARTIAL_COMPLETION's "partial" into a concrete list.
+std::string describe_converted_message(IMessage& msg, MapiRuntime& runtime) {
+    auto hex32s = [](uint32_t v) {
+        char b[16];
+        std::snprintf(b, sizeof(b), "%08lX", static_cast<unsigned long>(v));
+        return std::string(b);
+    };
+    std::string out;
+
+    LPSPropTagArray tags = nullptr;
+    HRESULT hr = msg.GetPropList(MAPI_UNICODE, &tags);
+    MapiBuffer tag_guard(runtime.MAPIFreeBuffer);
+    *tag_guard.put() = tags;
+    if (SUCCEEDED(hr) && tags) {
+        out += "props=" + std::to_string(tags->cValues) + " [";
+        ULONG limit = tags->cValues < 48 ? tags->cValues : 48;
+        for (ULONG i = 0; i < limit; ++i) out += hex32s(tags->aulPropTag[i]) + " ";
+        if (tags->cValues > limit) out += "...";
+        out += "]";
+    } else {
+        out += "GetPropList:err=" + hex32s(static_cast<uint32_t>(hr));
+    }
+
+    auto read_string = [&](ULONG tag, const char* label, bool ansi) {
+        SizedSPropTagArray(1, want) = {1, {tag}};
+        ULONG count = 0;
+        LPSPropValue values = nullptr;
+        HRESULT phr = msg.GetProps(reinterpret_cast<LPSPropTagArray>(&want), 0, &count, &values);
+        MapiBuffer guard(runtime.MAPIFreeBuffer);
+        *guard.put() = values;
+        out += std::string(" ") + label + "=";
+        if (FAILED(phr) || count == 0) {
+            out += "err:" + hex32s(static_cast<uint32_t>(phr));
+        } else if (PROP_TYPE(values[0].ulPropTag) == PT_ERROR) {
+            out += "err:" + hex32s(static_cast<uint32_t>(values[0].Value.err));
+        } else if (!ansi && PROP_TYPE(values[0].ulPropTag) == PT_UNICODE) {
+            std::wstring w(values[0].Value.lpszW);
+            out += "'" + utf8_from_wide(w.substr(0, 80)) + "'";
+        } else if (ansi && PROP_TYPE(values[0].ulPropTag) == PT_STRING8) {
+            out += "'" + std::string(values[0].Value.lpszA).substr(0, 80) + "'";
+        } else {
+            out += "type:" + hex32s(values[0].ulPropTag);
+        }
+    };
+    read_string(PR_SUBJECT_W, "subjW", false);
+    read_string(PR_SUBJECT_A, "subjA", true);
+    read_string(PR_BODY_W, "body", false);
+    read_string(PR_MESSAGE_CLASS_W, "class", false);
+
+    auto table_count = [&](const char* label, auto getter) {
+        MapiPtr<IMAPITable> table;
+        HRESULT thr = getter(table);
+        if (FAILED(thr)) {
+            out += std::string(" ") + label + "=err:" + hex32s(static_cast<uint32_t>(thr));
+            return;
+        }
+        ULONG rows = 0;
+        if (SUCCEEDED(table->GetRowCount(0, &rows))) {
+            out += std::string(" ") + label + "=" + std::to_string(rows);
+        } else {
+            out += std::string(" ") + label + "=?";
+        }
+    };
+    table_count("recips", [&](MapiPtr<IMAPITable>& t) { return msg.GetRecipientTable(0, t.put()); });
+    table_count("attach", [&](MapiPtr<IMAPITable>& t) { return msg.GetAttachmentTable(0, t.put()); });
+    return out;
+}
+
+// Minimal ASCII canary: no MIME structure, no encoded words, no Hebrew. If
+// even THIS partial-completes, the failure is structural (session/store
+// side); if it converts while the full fixture does not, the failure is
+// content-shaped. Diagnostic only - never gates the run.
+constexpr char kCanaryEml[] =
+    "From: canary@wlm2pst.invalid\r\n"
+    "To: canary@wlm2pst.invalid\r\n"
+    "Subject: wlm2pst canary\r\n"
+    "Date: Tue, 01 Jul 2003 10:52:37 +0200\r\n"
+    "\r\n"
+    "canary body\r\n";
+
 // Judges one converted message: structural integrity plus the Hebrew
 // content checks (fixture text only; never user content).
 Status judge_self_test_message(IMessage& msg, MapiRuntime& runtime) {
@@ -603,6 +699,38 @@ Result<ConverterConfig> run_converter_calibration(MapiRuntime& runtime) {
                 return make_hresult_error(static_cast<int32_t>(hr), "IStream::Write");
             }
 
+            // Diagnostic canary (never gates): a minimal ASCII message with no
+            // MIME structure. Converts structural failures apart from
+            // content-shaped ones, and its describe() lines turn
+            // MAPI_W_PARTIAL_COMPLETION into a concrete property list.
+            {
+                MapiPtr<IStream> canary_stream;
+                if (SUCCEEDED(CreateStreamOnHGlobal(nullptr, TRUE, canary_stream.put()))) {
+                    ULONG canary_written = 0;
+                    (void)canary_stream->Write(kCanaryEml,
+                                               static_cast<ULONG>(sizeof(kCanaryEml) - 1),
+                                               &canary_written);
+                    auto canary_conv = MimeConverter::create(runtime);
+                    auto canary_msg = store.value()->create_message(*folder.value().get());
+                    if (canary_conv.ok() && canary_msg.ok()) {
+                        if (adr_book) {
+                            (void)canary_conv.value().set_address_book(adr_book.get());
+                        }
+                        Status converted = canary_conv.value().convert(
+                            *canary_stream.get(), *canary_msg.value().get(), kCcsfSmtp);
+                        global_logger().info(
+                            std::string("self-test canary (minimal ASCII): convert ") +
+                            (converted.ok() ? "ok" : "failed at " + converted.error().operation) +
+                            "; pre-save: " +
+                            describe_converted_message(*canary_msg.value().get(), runtime));
+                        (void)canary_msg.value()->SaveChanges(KEEP_OPEN_READWRITE);
+                        global_logger().info(
+                            "self-test canary post-save: " +
+                            describe_converted_message(*canary_msg.value().get(), runtime));
+                    }
+                }
+            }
+
             const ConverterConfig variants[] = {
                 {true, kCcsfSmtp | kCcsfIncludeBcc | kCcsfGlobalMessage},
                 {true, kCcsfSmtp | kCcsfIncludeBcc},
@@ -644,6 +772,26 @@ Result<ConverterConfig> run_converter_calibration(MapiRuntime& runtime) {
                                          " (subject, body, attachment verified)");
                     store_close();
                     return variant;
+                }
+                // Pre-save judge failed: record what actually landed, then
+                // test the deferred-write hypothesis (some converter builds
+                // materialize properties only at SaveChanges).
+                global_logger().info("self-test " + label + " pre-save: " +
+                                     describe_converted_message(*message.value().get(), runtime));
+                HRESULT save_hr = message.value()->SaveChanges(KEEP_OPEN_READWRITE);
+                if (SUCCEEDED(save_hr)) {
+                    Status post_save = judge_self_test_message(*message.value().get(), runtime);
+                    if (post_save.ok()) {
+                        global_logger().info("MIME converter calibrated: " + label +
+                                             " (verified AFTER SaveChanges - converter "
+                                             "defers property writes)");
+                        store_close();
+                        return variant;
+                    }
+                    global_logger().info("self-test " + label + " post-save: " +
+                                         describe_converted_message(*message.value().get(),
+                                                                    runtime));
+                    judged = post_save;
                 }
                 diagnostics += " [" + label + ": " + judged.error().message + "]";
                 global_logger().info("self-test variant rejected: " + label + " - " +

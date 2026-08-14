@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed (fourth verification round - diagnosis instrumentation)
+
+- Field round 4 identified `MIMEToMAPI` returning `MAPI_W_PARTIAL_COMPLETION`
+  (0x00040680) identically across every address-book/flag variant - the
+  converter runs and partially completes rather than doing nothing. To turn
+  "partial" into a concrete list:
+  - The calibration ladder now logs a full post-mortem of every rejected
+    variant (GetPropList tags, subject in both widths, body head, message
+    class, recipient and attachment table counts) both before and after
+    `SaveChanges`.
+  - A minimal-ASCII canary message (no MIME structure, no encoded words) is
+    converted first and described, separating structural failures from
+    content-shaped ones.
+  - Deferred-write hypothesis is tested automatically: each variant is
+    re-judged after `SaveChanges`; if properties only materialize at save,
+    calibration accepts the variant and says so.
+- The per-message conversion-integrity gate moved to after `SaveChanges`
+  (same hypothesis); on violation the just-saved message is deleted so
+  nothing corrupt persists.
+
 ### Fixed (third verification round)
 
 - **Converter driven per Microsoft's documented import sequence.** Field

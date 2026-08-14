@@ -47,6 +47,9 @@ DECLARE_MAPI_INTERFACE_(IMsgServiceAdmin2, IUnknown)
 #ifndef PR_SUBJECT_W
 #define PR_SUBJECT_W PROP_TAG(PT_UNICODE, 0x0037)
 #endif
+#ifndef PR_SUBJECT_A
+#define PR_SUBJECT_A PROP_TAG(PT_STRING8, 0x0037)
+#endif
 #ifndef PR_BODY_W
 #define PR_BODY_W PROP_TAG(PT_UNICODE, 0x1000)
 #endif
