@@ -71,10 +71,13 @@ inline constexpr IID kIidIConverterSession =
 inline constexpr IID kIidIMsgServiceAdmin2 =
     {0x00020387, 0x0000, 0x0000, {0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
 
-// CCSF_* conversion flags (Microsoft documented values).
+// CCSF_* conversion flags. Values verified against MFCMAPI
+// core/mapi/extraPropTags.h (lines 946-957): a hand-transcribed 0x00020000
+// for CCSF_GLOBAL_MESSAGE shipped in early builds and was caught by field
+// verification - the real value is 0x00200000.
 inline constexpr ULONG kCcsfSmtp = 0x0002;            // treat as SMTP/MIME message
 inline constexpr ULONG kCcsfIncludeBcc = 0x0020;      // preserve BCC when present
-inline constexpr ULONG kCcsfGlobalMessage = 0x00020000;  // international/EAI headers (Outlook 2010+)
+inline constexpr ULONG kCcsfGlobalMessage = 0x00200000;  // international/EAI (RFC 6530)
 
 // Types referenced by the IConverterSession vtable that live in Inet headers
 // we do not otherwise need; minimal stand-ins keep the layout identical.
