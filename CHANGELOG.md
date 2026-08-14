@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (fifth round - second conversion engine)
+
+- **MimeOle import engine** (`src/worker/mapi/mimeole_importer.*`): a full
+  fallback conversion path built on Windows' own MIME parser
+  (`inetcomm.dll`) - the engine Windows Live Mail itself wrote these EML
+  files with. MimeOle parses (subject, sender, To/Cc/Bcc, text and HTML
+  bodies with full charset/RFC 2047/RFC 2231 handling, attachments including
+  inline CID parts, Message-ID/In-Reply-To/References, transport headers);
+  WLM2PST maps the parsed parts onto MAPI properties. Parsing remains a
+  Microsoft engine end to end - this is not a hand-built MIME parser.
+- The preflight calibration now ends with an `engine=mimeole` variant: when
+  Outlook's `IConverterSession` fails content verification (the field-proven
+  situation on current Click-to-Run), the MimeOle engine is verified with
+  the same subject/body/attachment judges and selected only if it passes.
+  `IConverterSession` remains primary wherever it actually works.
+- Rationale and field evidence: `docs/verification/` (rounds 1-4);
+  `IConverterSession` is not usable out-of-process on current C2R Office,
+  and Microsoft's own MrMAPI fails the same way there.
+
+
 ### Changed (fourth verification round - diagnosis instrumentation)
 
 - Field round 4 identified `MIMEToMAPI` returning `MAPI_W_PARTIAL_COMPLETION`

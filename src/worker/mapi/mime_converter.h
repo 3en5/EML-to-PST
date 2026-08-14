@@ -46,6 +46,11 @@ Result<TempFile> write_normalized_copy(const std::wstring& source_path);
 struct ConverterConfig {
     bool use_address_book = true;  // IMAPISession::OpenAddressBook + SetAdrBook
     ULONG flags = kCcsfSmtp | kCcsfIncludeBcc | kCcsfGlobalMessage;
+    // Engine selection: Outlook's IConverterSession when it provably works;
+    // otherwise Windows' own MimeOle parser (inetcomm.dll) - the engine
+    // Windows Live Mail itself wrote these EML files with. Chosen by the
+    // preflight calibration, never guessed (see mimeole_importer.h).
+    bool use_mimeole = false;
 };
 
 class MimeConverter {
