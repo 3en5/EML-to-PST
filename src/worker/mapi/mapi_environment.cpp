@@ -17,7 +17,10 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cstdio>
 #include <map>
+#include <optional>
+#include <string_view>
 #include <sstream>
 
 namespace wlm2pst {
@@ -43,9 +46,10 @@ std::wstring filename_of(const std::wstring& relative_path) {
 class MapiPstSession final : public IPstSession {
 public:
     MapiPstSession(MapiRuntime& runtime, std::unique_ptr<TemporaryProfile> profile,
-                   std::unique_ptr<PstStore> store, EntryId root, TrackingTags tags)
+                   std::unique_ptr<PstStore> store, EntryId root, TrackingTags tags,
+                   ConverterConfig converter_config)
         : runtime_(&runtime), profile_(std::move(profile)), store_(std::move(store)),
-          root_(std::move(root)), tags_(tags) {}
+          root_(std::move(root)), tags_(tags), converter_config_(converter_config) {}
 
     ~MapiPstSession() override { (void)close(); }
 
@@ -314,6 +318,7 @@ public:
         if (closed_) return Status::success();
         closed_ = true;
         converter_.reset();
+        adr_book_.reset();
         if (store_) store_->close();
         store_.reset();
         Status profile_status = Status::success();
@@ -327,7 +332,25 @@ private:
         if (converter_) return Status::success();
         auto conv = MimeConverter::create(*runtime_);
         if (!conv.ok()) return conv.error();
-        converter_ = std::make_unique<MimeConverter>(std::move(conv.value()));
+        auto converter = std::make_unique<MimeConverter>(std::move(conv.value()));
+
+        // Drive the converter exactly as calibrated by the preflight
+        // self-test (Microsoft's documented import sequence attaches the
+        // session's address book before MIMEToMAPI).
+        if (converter_config_.use_address_book) {
+            if (!adr_book_) {
+                HRESULT hr = store_->session()->OpenAddressBook(0, nullptr, AB_NO_DIALOG,
+                                                                adr_book_.put());
+                // Warnings (e.g. no AB providers in a PST-only profile) still
+                // yield a usable IAddrBook; only hard failures block.
+                if (FAILED(hr) || !adr_book_) {
+                    return make_hresult_error(static_cast<int32_t>(hr),
+                                              "IMAPISession::OpenAddressBook");
+                }
+            }
+            if (Status s = converter->set_address_book(adr_book_.get()); !s.ok()) return s;
+        }
+        converter_ = std::move(converter);
         return Status::success();
     }
 
@@ -344,7 +367,8 @@ private:
         if (!message.ok()) return message.error();
         IMessage& msg = *message.value().get();
 
-        if (Status s = converter_->convert(*stream.value().get(), msg); !s.ok()) {
+        if (Status s = converter_->convert(*stream.value().get(), msg, converter_config_.flags);
+            !s.ok()) {
             // Unsaved message is discarded when released; nothing persists.
             return s.error();
         }
@@ -443,6 +467,8 @@ private:
     std::unique_ptr<PstStore> store_;
     EntryId root_;
     TrackingTags tags_;
+    ConverterConfig converter_config_;
+    MapiPtr<IAddrBook> adr_book_;
     std::unique_ptr<MimeConverter> converter_;
     std::map<std::wstring, EntryId> folder_cache_;
     bool closed_ = false;
@@ -480,7 +506,42 @@ constexpr char kSelfTestEml[] =
     "AAECAwQFBgc=\r\n"
     "--wlm2pst-selftest--\r\n";
 
-Status run_converter_self_test(MapiRuntime& runtime) {
+// Judges one converted message: structural integrity plus the Hebrew
+// content checks (fixture text only; never user content).
+Status judge_self_test_message(IMessage& msg, MapiRuntime& runtime) {
+    MessageMetadata expectations;
+    expectations.source_declared_subject = true;
+    expectations.source_multipart_mixed = true;
+    if (Status s = verify_conversion_integrity(msg, runtime, expectations); !s.ok()) {
+        return s;
+    }
+    auto prop_contains = [&](ULONG tag, const wchar_t* needle, const char* what) -> Status {
+        SizedSPropTagArray(1, tags) = {1, {tag}};
+        ULONG count = 0;
+        LPSPropValue values = nullptr;
+        HRESULT phr = msg.GetProps(reinterpret_cast<LPSPropTagArray>(&tags), 0, &count, &values);
+        MapiBuffer prop_guard(runtime.MAPIFreeBuffer);
+        *prop_guard.put() = values;
+        bool ok = !FAILED(phr) && count > 0 && PROP_TYPE(values[0].ulPropTag) == PT_UNICODE &&
+                  std::wstring_view(values[0].Value.lpszW).find(needle) !=
+                      std::wstring_view::npos;
+        if (!ok) {
+            return make_error("converter_self_test",
+                              std::string(what) + " did not survive conversion");
+        }
+        return Status::success();
+    };
+    if (Status s = prop_contains(PR_SUBJECT_W, L"\u05e9\u05dc\u05d5\u05dd", "RFC 2047 encoded subject");
+        !s.ok()) {
+        return s;
+    }
+    return prop_contains(PR_BODY_W, L"\u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd", "UTF-8 body text");
+}
+
+// Tries converter-driving variants in a fixed order against the bundled
+// fixture; the first that provably converts becomes the run configuration.
+// A converter that cannot be made to convert aborts the run - loudly.
+Result<ConverterConfig> run_converter_calibration(MapiRuntime& runtime) {
     // Throwaway PST under %TEMP%; removed unconditionally at the end.
     wchar_t temp_dir[MAX_PATH + 1] = {};
     DWORD n = GetTempPathW(MAX_PATH + 1, temp_dir);
@@ -490,108 +551,114 @@ Status run_converter_self_test(MapiRuntime& runtime) {
     std::wstring pst_path = std::wstring(temp_dir) + L"wlm2pst-selftest-" +
                             wide_from_utf8(new_guid_string()) + L".pst";
 
-    Status result = Status::success();
+    auto hex_flags = [](ULONG flags) {
+        char b[16];
+        std::snprintf(b, sizeof(b), "0x%05lX", static_cast<unsigned long>(flags));
+        return std::string(b);
+    };
+
+    Result<ConverterConfig> result =
+        make_error("converter_self_test", "calibration did not run");
     {
         auto profile = TemporaryProfile::create(runtime, "WLM2PST-");
         if (!profile.ok()) return profile.error();
 
-        auto run = [&]() -> Status {
+        auto run = [&]() -> Result<ConverterConfig> {
             if (Status s = profile.value()->add_unicode_pst_service(pst_path, L"WLM2PST SelfTest");
                 !s.ok()) {
-                return s;
+                return s.error();
             }
             auto store = PstStore::logon_and_open(runtime, profile.value()->name());
             if (!store.ok()) return store.error();
+            auto store_close = [&]() { store.value()->close(); };
 
             auto root = store.value()->ensure_root_folder(L"SelfTest");
-            if (!root.ok()) { store.value()->close(); return root.error(); }
+            if (!root.ok()) { store_close(); return root.error(); }
             auto folder = store.value()->open_folder(root.value());
-            if (!folder.ok()) { store.value()->close(); return folder.error(); }
-            auto message = store.value()->create_message(*folder.value().get());
-            if (!message.ok()) { store.value()->close(); return message.error(); }
-            IMessage& msg = *message.value().get();
+            if (!folder.ok()) { store_close(); return folder.error(); }
 
-            auto converter = MimeConverter::create(runtime);
-            if (!converter.ok()) { store.value()->close(); return converter.error(); }
+            // Address book from this session (may legitimately fail on
+            // exotic setups; AB-less variants remain available then).
+            MapiPtr<IAddrBook> adr_book;
+            HRESULT ab_hr = store.value()->session()->OpenAddressBook(0, nullptr, AB_NO_DIALOG,
+                                                                      adr_book.put());
+            if (FAILED(ab_hr) || !adr_book) {
+                global_logger().warn("self-test: OpenAddressBook failed, hr=" +
+                                     std::to_string(ab_hr) + "; AB variants skipped");
+                adr_book.reset();
+            }
 
-            // In-memory stream over the bundled fixture.
+            // In-memory stream over the bundled fixture (rewound per attempt).
             MapiPtr<IStream> stream;
             HRESULT hr = CreateStreamOnHGlobal(nullptr, TRUE, stream.put());
             if (FAILED(hr)) {
-                store.value()->close();
+                store_close();
                 return make_hresult_error(static_cast<int32_t>(hr), "CreateStreamOnHGlobal");
             }
             ULONG written = 0;
             hr = stream->Write(kSelfTestEml, static_cast<ULONG>(sizeof(kSelfTestEml) - 1),
                                &written);
             if (FAILED(hr) || written != sizeof(kSelfTestEml) - 1) {
-                store.value()->close();
+                store_close();
                 return make_hresult_error(static_cast<int32_t>(hr), "IStream::Write");
             }
-            if (Status s = converter.value().convert(*stream.get(), msg); !s.ok()) {
-                store.value()->close();
-                return s;
-            }
 
-            // Judge the outcome: subject decoded, body decoded, one attachment.
-            MessageMetadata expectations;
-            expectations.source_declared_subject = true;
-            expectations.source_multipart_mixed = true;
-            Status integrity = verify_conversion_integrity(msg, runtime, expectations);
-            if (!integrity.ok()) {
-                store.value()->close();
-                return make_error(
-                    "converter_self_test",
-                    "the MIME converter instantiates but does not convert (" +
-                        integrity.error().message +
-                        "); refusing to run rather than write an unusable PST. "
-                        "This occurs when Outlook's converter class cannot be obtained "
-                        "correctly (Click-to-Run registration).");
-            }
-
-            // Content checks: RFC 2047 subject decoding and UTF-8 body text
-            // must actually survive (fixture text only; never user content).
-            auto prop_contains = [&](ULONG tag, const wchar_t* needle,
-                                     const char* what) -> Status {
-                SizedSPropTagArray(1, tags) = {1, {tag}};
-                ULONG count = 0;
-                LPSPropValue values = nullptr;
-                HRESULT phr = msg.GetProps(reinterpret_cast<LPSPropTagArray>(&tags), 0,
-                                           &count, &values);
-                MapiBuffer prop_guard(runtime.MAPIFreeBuffer);
-                *prop_guard.put() = values;
-                bool ok = !FAILED(phr) && count > 0 &&
-                          PROP_TYPE(values[0].ulPropTag) == PT_UNICODE &&
-                          std::wstring_view(values[0].Value.lpszW).find(needle) !=
-                              std::wstring_view::npos;
-                if (!ok) {
-                    return make_error("converter_self_test",
-                                      std::string(what) +
-                                          " did not survive conversion; refusing to run "
-                                          "rather than write an unusable PST");
-                }
-                return Status::success();
+            const ConverterConfig variants[] = {
+                {true, kCcsfSmtp | kCcsfIncludeBcc | kCcsfGlobalMessage},
+                {true, kCcsfSmtp | kCcsfIncludeBcc},
+                {true, kCcsfSmtp},
+                {false, kCcsfSmtp | kCcsfIncludeBcc | kCcsfGlobalMessage},
+                {false, kCcsfSmtp | kCcsfIncludeBcc},
+                {false, kCcsfSmtp},
             };
-            if (Status s = prop_contains(PR_SUBJECT_W, L"שלום", "RFC 2047 encoded subject");
-                !s.ok()) {
-                store.value()->close();
-                return s;
+            std::string diagnostics;
+            for (const ConverterConfig& variant : variants) {
+                std::string label = std::string("adrbook=") +
+                                    (variant.use_address_book ? "1" : "0") +
+                                    " flags=" + hex_flags(variant.flags);
+                if (variant.use_address_book && !adr_book) {
+                    diagnostics += " [" + label + ": skipped, no address book]";
+                    continue;
+                }
+                auto converter = MimeConverter::create(runtime);
+                if (!converter.ok()) { store_close(); return converter.error(); }
+                if (variant.use_address_book) {
+                    if (Status s = converter.value().set_address_book(adr_book.get()); !s.ok()) {
+                        diagnostics += " [" + label + ": SetAdrBook " + s.error().operation + "]";
+                        continue;
+                    }
+                }
+                auto message = store.value()->create_message(*folder.value().get());
+                if (!message.ok()) { store_close(); return message.error(); }
+
+                Status converted = converter.value().convert(*stream.get(),
+                                                             *message.value().get(),
+                                                             variant.flags);
+                if (!converted.ok()) {
+                    diagnostics += " [" + label + ": " + converted.error().operation + "]";
+                    continue;
+                }
+                Status judged = judge_self_test_message(*message.value().get(), runtime);
+                if (judged.ok()) {
+                    global_logger().info("MIME converter calibrated: " + label +
+                                         " (subject, body, attachment verified)");
+                    store_close();
+                    return variant;
+                }
+                diagnostics += " [" + label + ": " + judged.error().message + "]";
+                global_logger().info("self-test variant rejected: " + label + " - " +
+                                     judged.error().message);
             }
-            if (Status s = prop_contains(PR_BODY_W, L"שלום עולם", "UTF-8 body text");
-                !s.ok()) {
-                store.value()->close();
-                return s;
-            }
-            store.value()->close();
-            return Status::success();
+            store_close();
+            return make_error(
+                "converter_self_test",
+                "no converter configuration actually converts; refusing to run rather than "
+                "write an unusable PST. Variant results:" + diagnostics);
         };
         result = run();
         (void)profile.value()->remove();
     }
     DeleteFileW(pst_path.c_str());
-    if (result.ok()) {
-        global_logger().info("MIME converter self-test passed (subject, body, attachment)");
-    }
     return result;
 }
 
@@ -614,8 +681,13 @@ public:
         if (!removal.ok()) return removal;
 
         // MIME converter must not merely instantiate - it must CONVERT
-        // (spec section 6 strengthened after the Click-to-Run field failure).
-        return run_converter_self_test(runtime_);
+        // (spec section 6 strengthened after the Click-to-Run field
+        // failure). Calibration finds the driving variant that provably
+        // converts and locks it in for the whole run.
+        auto calibrated = run_converter_calibration(runtime_);
+        if (!calibrated.ok()) return calibrated.error();
+        converter_config_ = calibrated.value();
+        return Status::success();
     }
 
     Result<std::unique_ptr<IPstSession>> create_session(
@@ -663,7 +735,8 @@ public:
 
         return std::unique_ptr<IPstSession>(new MapiPstSession(
             runtime_, std::move(profile.value()), std::move(store.value()),
-            std::move(root.value()), tags.value()));
+            std::move(root.value()), tags.value(),
+            converter_config_.value_or(ConverterConfig{})));
     }
 
     Status cleanup_stale_profiles() override {
@@ -689,6 +762,10 @@ private:
     ComInit com_;
     MapiRuntime runtime_;
     bool ready_ = false;
+    // Set by preflight calibration; sessions created without a prior
+    // preflight fall back to the documented default (AB + full flags) and
+    // remain guarded by the per-message integrity gate.
+    std::optional<ConverterConfig> converter_config_;
 };
 
 }  // namespace
