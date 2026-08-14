@@ -506,6 +506,73 @@ constexpr char kSelfTestEml[] =
     "AAECAwQFBgc=\r\n"
     "--wlm2pst-selftest--\r\n";
 
+// TEMPORARY DIAGNOSTIC (not for merge as-is): reports exactly what landed on a
+// converted message, so MAPI_W_PARTIAL_COMPLETION stops being an adjective and
+// becomes a list. Fixture content only - this only ever runs against
+// kSelfTestEml, never user mail.
+void diag_dump_converted(IMessage& msg, MapiRuntime& runtime, const std::string& label) {
+    auto& log = global_logger();
+
+    LPSPropTagArray tags = nullptr;
+    HRESULT hr = msg.GetPropList(0, &tags);
+    if (SUCCEEDED(hr) && tags) {
+        std::string list;
+        for (ULONG i = 0; i < tags->cValues && i < 60; ++i) {
+            char b[16];
+            std::snprintf(b, sizeof(b), "%08lX ", static_cast<unsigned long>(tags->aulPropTag[i]));
+            list += b;
+        }
+        log.info("DIAG[" + label + "] proplist count=" + std::to_string(tags->cValues) + " : " + list);
+        runtime.MAPIFreeBuffer(tags);
+    } else {
+        log.info("DIAG[" + label + "] GetPropList failed hr=" + std::to_string(hr));
+    }
+
+    auto count_rows = [&](const char* what, HRESULT thr, IMAPITable* tbl) {
+        if (FAILED(thr) || !tbl) {
+            log.info("DIAG[" + label + "] " + what + " table hr=" + std::to_string(thr));
+            return;
+        }
+        ULONG rows = 0;
+        HRESULT crh = tbl->GetRowCount(0, &rows);
+        log.info("DIAG[" + label + "] " + what + " rows=" + std::to_string(rows) +
+                 " (hr=" + std::to_string(crh) + ")");
+    };
+    {
+        MapiPtr<IMAPITable> rcpt;
+        count_rows("recipient", msg.GetRecipientTable(0, rcpt.put()), rcpt.get());
+        MapiPtr<IMAPITable> att;
+        count_rows("attachment", msg.GetAttachmentTable(0, att.put()), att.get());
+    }
+
+    // What the body actually looks like (fixture text only).
+    SizedSPropTagArray(2, want) = {2, {PR_SUBJECT_W, PR_BODY_W}};
+    ULONG n = 0;
+    LPSPropValue vals = nullptr;
+    HRESULT ghr = msg.GetProps(reinterpret_cast<LPSPropTagArray>(&want), 0, &n, &vals);
+    MapiBuffer guard(runtime.MAPIFreeBuffer);
+    *guard.put() = vals;
+    if (!FAILED(ghr) && vals) {
+        for (ULONG i = 0; i < n; ++i) {
+            const char* name = (i == 0) ? "subject" : "body";
+            if (PROP_TYPE(vals[i].ulPropTag) == PT_ERROR) {
+                char b[24];
+                std::snprintf(b, sizeof(b), "0x%08lX",
+                              static_cast<unsigned long>(vals[i].Value.err));
+                log.info("DIAG[" + label + "] " + name + " = PT_ERROR " + b);
+            } else if (PROP_TYPE(vals[i].ulPropTag) == PT_UNICODE) {
+                std::wstring_view v(vals[i].Value.lpszW);
+                log.info("DIAG[" + label + "] " + name + " len=" + std::to_string(v.size()) +
+                         " utf8=[" + utf8_from_wide(std::wstring(v.substr(0, 90))) + "]");
+            } else {
+                log.info("DIAG[" + label + "] " + name + " unexpected type");
+            }
+        }
+    } else {
+        log.info("DIAG[" + label + "] GetProps failed hr=" + std::to_string(ghr));
+    }
+}
+
 // Judges one converted message: structural integrity plus the Hebrew
 // content checks (fixture text only; never user content).
 Status judge_self_test_message(IMessage& msg, MapiRuntime& runtime) {
@@ -603,13 +670,21 @@ Result<ConverterConfig> run_converter_calibration(MapiRuntime& runtime) {
                 return make_hresult_error(static_cast<int32_t>(hr), "IStream::Write");
             }
 
+            // TEMPORARY DIAGNOSTIC (diag-partial-completion branch): probe raw
+            // single-bit flag values to find out what this converter really
+            // treats as "parse this as SMTP/MIME". The CCSF_* constants in
+            // mapi_constants.h are hand-entered from prose docs and are not
+            // defined in any Microsoft header we vendor, so 0x0002 itself is
+            // under test here. adrbook=0 everywhere: proven irrelevant.
             const ConverterConfig variants[] = {
-                {true, kCcsfSmtp | kCcsfIncludeBcc | kCcsfGlobalMessage},
-                {true, kCcsfSmtp | kCcsfIncludeBcc},
-                {true, kCcsfSmtp},
-                {false, kCcsfSmtp | kCcsfIncludeBcc | kCcsfGlobalMessage},
-                {false, kCcsfSmtp | kCcsfIncludeBcc},
-                {false, kCcsfSmtp},
+                {false, 0x0000},  // bare call
+                {false, 0x0001},
+                {false, 0x0002},  // current kCcsfSmtp guess
+                {false, 0x0004},
+                {false, 0x0008},
+                {false, 0x0010},
+                {false, 0x0040},
+                {false, 0x0080},
             };
             std::string diagnostics;
             for (const ConverterConfig& variant : variants) {
@@ -638,6 +713,12 @@ Result<ConverterConfig> run_converter_calibration(MapiRuntime& runtime) {
                     diagnostics += " [" + label + ": " + converted.error().operation + "]";
                     continue;
                 }
+                // TEMPORARY DIAGNOSTIC: what landed before saving, then after.
+                diag_dump_converted(*message.value().get(), runtime, label + " pre-save");
+                HRESULT save_hr = message.value()->SaveChanges(KEEP_OPEN_READWRITE);
+                global_logger().info("DIAG[" + label + "] SaveChanges hr=" +
+                                     std::to_string(save_hr));
+                diag_dump_converted(*message.value().get(), runtime, label + " post-save");
                 Status judged = judge_self_test_message(*message.value().get(), runtime);
                 if (judged.ok()) {
                     global_logger().info("MIME converter calibrated: " + label +

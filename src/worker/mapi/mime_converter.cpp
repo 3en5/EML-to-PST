@@ -175,6 +175,38 @@ std::vector<std::wstring> c2r_inproc_server_candidates(REFCLSID clsid) {
     return candidates;
 }
 
+// TEMPORARY DIAGNOSTIC (diag-partial-completion): OUTLMIME.DLL statically
+// imports the Office core (MSO.dll, Mso*Win32Client.dll), which normally runs
+// inside the C2R/AppV virtualization context. Hypothesis: loaded raw, the
+// converter degrades to dump-body-and-warn. ISV practice for using C2R Outlook
+// components in-process is to load Office's AppvIsvSubsystems dll first; try
+// exactly that, once, and log what happens.
+void diag_try_appv_bootstrap(const std::wstring& registered_dll) {
+    static bool attempted = false;
+    if (attempted) return;
+    attempted = true;
+    const size_t office16 = registered_dll.rfind(L"\\Office16\\");
+    if (office16 == std::wstring::npos) {
+        global_logger().info("DIAG appv: cannot derive Client dir from registered dll path");
+        return;
+    }
+    const std::wstring client_dir = registered_dll.substr(0, office16) + L"\\Client\\";
+    const wchar_t* names[] = {
+#ifdef _WIN64
+        L"AppvIsvSubsystems64.dll", L"C2R64.dll",
+#else
+        L"AppvIsvSubsystems32.dll", L"C2R32.dll",
+#endif
+    };
+    for (const wchar_t* name : names) {
+        const std::wstring full = client_dir + name;
+        HMODULE m = LoadLibraryExW(full.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        global_logger().info(std::string("DIAG appv: LoadLibrary ") +
+                             utf8_from_wide(std::wstring(name)) +
+                             (m ? " OK" : " FAILED err=" + std::to_string(GetLastError())));
+    }
+}
+
 HRESULT create_from_dll(const std::wstring& dll, REFCLSID clsid, REFIID iid, void** out) {
     HMODULE mod = GetModuleHandleW(dll.c_str());
     if (!mod) {
@@ -212,6 +244,7 @@ Result<MimeConverter> MimeConverter::create(MapiRuntime& runtime) {
     // Click-to-Run route: the dll registered in the C2R virtual hive.
     HRESULT last_hr = hr;
     for (const std::wstring& dll : c2r_inproc_server_candidates(kClsidIConverterSession)) {
+        diag_try_appv_bootstrap(dll);  // TEMPORARY DIAGNOSTIC
         hr = create_from_dll(dll, kClsidIConverterSession, kIidIConverterSession,
                              converter.session_.put_void());
         if (SUCCEEDED(hr)) {
