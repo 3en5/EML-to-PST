@@ -265,7 +265,8 @@ was diagnosed, and why the tool drives Windows' own MimeOle engine — is in
 
 ## Credits
 
-Developed by **Natanor IT Services** — <https://natanor.co.il>
+Developed by **[KALIT](https://kalit.co.il)** — the development arm of
+**[Natanor IT Services](https://natanor.co.il)**.
 
 Licensed under the [MIT License](LICENSE). Uses the SQLite amalgamation
 (public domain) and Microsoft's Extended MAPI headers from the MAPI Stub
