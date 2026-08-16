@@ -171,7 +171,7 @@ TEST_CASE("ProgressPrinter: preflight banner includes source, counts, output, ou
     FakeClock clock;
     ProgressPrinter printer(false, false, out, std::ref(clock));
 
-    printer.print_preflight(L"C:\\Mail\\Windows Live Mail", 18742, 137, 14388140442ULL, L"D:\\Migration\\Rina-Mail.pst",
+    printer.print_preflight(L"C:\\Mail\\Windows Live Mail", 18742, 137, 14388140442ULL, L"D:\\Migration\\Sample-Mail.pst",
                              "Classic Outlook 64-bit");
 
     const std::string text = out.str();
@@ -179,6 +179,6 @@ TEST_CASE("ProgressPrinter: preflight banner includes source, counts, output, ou
     CHECK(text.find("18,742") != std::string::npos);
     CHECK(text.find("137") != std::string::npos);
     CHECK(text.find("13.4 GiB") != std::string::npos);
-    CHECK(text.find("D:\\Migration\\Rina-Mail.pst") != std::string::npos);
+    CHECK(text.find("D:\\Migration\\Sample-Mail.pst") != std::string::npos);
     CHECK(text.find("Classic Outlook 64-bit") != std::string::npos);
 }

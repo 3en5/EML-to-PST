@@ -43,7 +43,7 @@ Basic conversion:
 
 Custom root folder name inside the PST:
 
-  wlm2pst.exe --source "C:\OldMail" --output "D:\Migration\OldMail.pst" --root-name "Rina old mail"
+  wlm2pst.exe --source "C:\OldMail" --output "D:\Migration\OldMail.pst" --root-name "Sample old mail"
 
 Resume an interrupted job (both the PST and its state database must
 already exist from a previous run):
@@ -112,3 +112,9 @@ wizard needed:
 
 Browse to the .pst file, and the migrated folders appear under the root
 folder name you chose (or "Windows Live Mail" by default).
+
+--------------------------------------------------------------------------
+Developed by KALIT (https://kalit.co.il) - the development arm of
+Natanor IT Services (https://natanor.co.il)
+Licensed under the MIT License. See THIRD-PARTY-NOTICES.txt for the
+components WLM2PST builds on.

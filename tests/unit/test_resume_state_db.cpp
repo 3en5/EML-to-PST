@@ -64,8 +64,8 @@ JobInfo make_job_info() {
     info.run_id = "11111111-2222-3333-4444-555555555555";
     info.tool_version = "1.0.0-test";
     info.source_root = widen("/source/root");
-    info.output_pst = widen("/out/Rina-Mail.pst");
-    info.root_name = widen("Rina Mail");
+    info.output_pst = widen("/out/Sample-Mail.pst");
+    info.root_name = widen("Sample Mail");
     info.outlook_bitness = "x64";
     info.created_at_utc = wlm2pst::filetime_from_unix_seconds(1700000000);
     info.manifest_hash = "deadbeefcafebabe0011223344556677";
@@ -159,7 +159,7 @@ TEST_CASE("create_new to an unreachable path returns a clean error", "[resume]")
 TEST_CASE("reopen round-trips job and Hebrew wide paths", "[resume]") {
     TempDbPath db_path("hebrew");
     JobInfo info = make_job_info();
-    info.root_name = L"תיבת דואר של רינה";  // "Rina's mailbox" in Hebrew
+    info.root_name = L"תיבת דואר לדוגמה";  // "sample mailbox" in Hebrew
     info.source_root = L"/source/מקור/root";
 
     std::vector<ManifestEntry> manifest;

@@ -41,18 +41,18 @@ TEST_CASE("parse_command_line applies documented defaults", "[cli]") {
 
 TEST_CASE("parse_command_line accepts --opt value form for --root-name", "[cli]") {
     auto result = parse_command_line(
-        args({L"--source", L"C:\\Mail", L"--output", L"D:\\out.pst", L"--root-name", L"Rina old mail"}));
+        args({L"--source", L"C:\\Mail", L"--output", L"D:\\out.pst", L"--root-name", L"Sample old mail"}));
     REQUIRE(result.ok);
-    CHECK(result.options.root_name == L"Rina old mail");
+    CHECK(result.options.root_name == L"Sample old mail");
 }
 
 TEST_CASE("parse_command_line accepts --opt=value form", "[cli]") {
     auto result = parse_command_line(
-        args({L"--source=C:\\Mail", L"--output=D:\\out.pst", L"--root-name=Rina old mail"}));
+        args({L"--source=C:\\Mail", L"--output=D:\\out.pst", L"--root-name=Sample old mail"}));
     REQUIRE(result.ok);
     CHECK(result.options.source == L"C:\\Mail");
     CHECK(result.options.output == L"D:\\out.pst");
-    CHECK(result.options.root_name == L"Rina old mail");
+    CHECK(result.options.root_name == L"Sample old mail");
 }
 
 TEST_CASE("parse_command_line accepts Hebrew root name", "[cli]") {
@@ -325,7 +325,7 @@ TEST_CASE("validate_options_lexical rejects source inside output's parent tree",
 TEST_CASE("validate_options_lexical allows sibling source and output trees", "[cli]") {
     CliOptions opts;
     opts.source = L"C:\\Mail\\Windows Live Mail";
-    opts.output = L"D:\\Migration\\Rina-Mail.pst";
+    opts.output = L"D:\\Migration\\Sample-Mail.pst";
     CHECK_FALSE(validate_options_lexical(opts).has_value());
 }
 
@@ -365,7 +365,7 @@ TEST_CASE("validate_options_lexical accepts a root name with trimmed trailing do
     CliOptions opts;
     opts.source = L"C:\\Mail";
     opts.output = L"D:\\Migration\\out.pst";
-    opts.root_name = L"Rina old mail...";
+    opts.root_name = L"Sample old mail...";
     CHECK_FALSE(validate_options_lexical(opts).has_value());
 }
 
