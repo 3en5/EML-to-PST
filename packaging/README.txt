@@ -43,7 +43,7 @@ Basic conversion:
 
 Custom root folder name inside the PST:
 
-  wlm2pst.exe --source "C:\OldMail" --output "D:\Migration\OldMail.pst" --root-name "Rina old mail"
+  wlm2pst.exe --source "C:\OldMail" --output "D:\Migration\OldMail.pst" --root-name "Sample old mail"
 
 Resume an interrupted job (both the PST and its state database must
 already exist from a previous run):

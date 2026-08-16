@@ -163,7 +163,7 @@ std::string usage_text() {
         "  wlm2pst.exe --source \"C:\\OldMail\" --output \"D:\\Migration\\OldMail.pst\"\n"
         "\n"
         "  wlm2pst.exe --source \"C:\\OldMail\" --output \"D:\\Migration\\OldMail.pst\" "
-        "--root-name \"Rina old mail\"\n"
+        "--root-name \"Sample old mail\"\n"
         "\n"
         "  wlm2pst.exe --source \"C:\\OldMail\" --output \"D:\\Migration\\OldMail.pst\" --resume\n";
 }

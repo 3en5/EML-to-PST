@@ -5,7 +5,7 @@ into **one** Unicode `.pst` file that opens locally in classic Microsoft
 Outlook. That is the entire product.
 
 ```powershell
-wlm2pst.exe --source "C:\Mail\Windows Live Mail" --output "D:\Migration\Rina-Mail.pst"
+wlm2pst.exe --source "C:\Mail\Windows Live Mail" --output "D:\Migration\Sample-Mail.pst"
 ```
 
 ## What it does

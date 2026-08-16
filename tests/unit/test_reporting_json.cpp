@@ -133,7 +133,7 @@ TEST_CASE("write_json_report: golden full-report comparison", "[reporting][json]
     data.tool_version = "1.0.0";
     data.run_id = "20260813-081244-abcd1234";
     data.source = L"C:\\Mail\\Windows Live Mail";
-    data.output = L"D:\\Migration\\Rina-Mail.pst";
+    data.output = L"D:\\Migration\\Sample-Mail.pst";
     data.started_at_utc_iso = "2026-08-13T08:12:44Z";
     data.completed_at_utc_iso = "2026-08-13T09:03:18Z";
     data.counters.source_files = 18742;
@@ -160,7 +160,7 @@ TEST_CASE("write_json_report: golden full-report comparison", "[reporting][json]
   "toolVersion": "1.0.0",
   "runId": "20260813-081244-abcd1234",
   "source": "C:\\Mail\\Windows Live Mail",
-  "output": "D:\\Migration\\Rina-Mail.pst",
+  "output": "D:\\Migration\\Sample-Mail.pst",
   "startedAtUtc": "2026-08-13T08:12:44Z",
   "completedAtUtc": "2026-08-13T09:03:18Z",
   "sourceFiles": 18742,

@@ -45,7 +45,7 @@ C:\Mail\Windows Live Mail\
 Exactly one new Unicode PST file, for example:
 
 ```text
-D:\Migration\Rina-Mail.pst
+D:\Migration\Sample-Mail.pst
 ```
 
 The PST must preserve the relative directory structure under one root folder inside the PST.
@@ -188,7 +188,7 @@ If only New Outlook is installed and classic Outlook MAPI is unavailable, exit w
 Minimum syntax:
 
 ```powershell
-wlm2pst.exe --source "C:\Mail\Windows Live Mail" --output "D:\Migration\Rina-Mail.pst"
+wlm2pst.exe --source "C:\Mail\Windows Live Mail" --output "D:\Migration\Sample-Mail.pst"
 ```
 
 Required options:
@@ -215,7 +215,7 @@ wlm2pst.exe --source "C:\OldMail" --output "D:\Migration\OldMail.pst"
 ```
 
 ```powershell
-wlm2pst.exe --source "C:\OldMail" --output "D:\Migration\OldMail.pst" --root-name "Rina old mail"
+wlm2pst.exe --source "C:\OldMail" --output "D:\Migration\OldMail.pst" --root-name "Sample old mail"
 ```
 
 ```powershell
@@ -274,7 +274,7 @@ Source:       C:\Mail\Windows Live Mail
 EML files:   18,742
 Folders:     137
 Source size: 13.4 GiB
-Output:      D:\Migration\Rina-Mail.pst
+Output:      D:\Migration\Sample-Mail.pst
 Outlook:     Classic Outlook 64-bit
 ```
 
@@ -723,7 +723,7 @@ Continue with other files unless a systemic failure occurs.
 Create a state database beside the output PST:
 
 ```text
-Rina-Mail.pst.wlm2pst-state.sqlite
+Sample-Mail.pst.wlm2pst-state.sqlite
 ```
 
 It is operational metadata, not another mail export.
@@ -977,7 +977,7 @@ Folders created:             137
 PST validation:           PASSED
 
 Output:
-D:\Migration\Rina-Mail.pst
+D:\Migration\Sample-Mail.pst
 ```
 
 ### JSON report
@@ -989,7 +989,7 @@ Create a machine-readable report containing at least:
   "toolVersion": "1.0.0",
   "runId": "...",
   "source": "C:\\Mail\\Windows Live Mail",
-  "output": "D:\\Migration\\Rina-Mail.pst",
+  "output": "D:\\Migration\\Sample-Mail.pst",
   "startedAtUtc": "2026-08-13T08:12:44Z",
   "completedAtUtc": "2026-08-13T09:03:18Z",
   "sourceFiles": 18742,
@@ -1614,7 +1614,7 @@ Follow these instructions while implementing:
 The final repository must provide a buildable, testable Windows application whose normal use is:
 
 ```powershell
-wlm2pst.exe --source "C:\Mail\Windows Live Mail" --output "D:\Migration\Rina-Mail.pst"
+wlm2pst.exe --source "C:\Mail\Windows Live Mail" --output "D:\Migration\Sample-Mail.pst"
 ```
 
 The resulting PST must be one Unicode PST that can be opened locally in classic Outlook, with the source folder tree and message content preserved as faithfully as the installed Outlook MIME converter and PST provider allow.

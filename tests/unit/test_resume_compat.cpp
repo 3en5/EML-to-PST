@@ -56,8 +56,8 @@ JobInfo make_baseline_job_info() {
     info.run_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     info.tool_version = "1.0.0-test";
     info.source_root = widen("/source/root");
-    info.output_pst = widen("/out/Rina-Mail.pst");
-    info.root_name = widen("Rina Mail");
+    info.output_pst = widen("/out/Sample-Mail.pst");
+    info.root_name = widen("Sample Mail");
     info.outlook_bitness = "x64";
     info.created_at_utc = wlm2pst::filetime_from_unix_seconds(1700000000);
     info.manifest_hash = "0123456789abcdef0123456789abcdef";
