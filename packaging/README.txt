@@ -112,3 +112,8 @@ wizard needed:
 
 Browse to the .pst file, and the migrated folders appear under the root
 folder name you chose (or "Windows Live Mail" by default).
+
+--------------------------------------------------------------------------
+Developed by Natanor IT Services  -  https://natanor.co.il
+Licensed under the MIT License. See THIRD-PARTY-NOTICES.txt for the
+components WLM2PST builds on.

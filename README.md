@@ -243,3 +243,31 @@ See [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Troubleshooting
 
 See [docs/troubleshooting.md](docs/troubleshooting.md).
+
+## Field-tested
+
+WLM2PST was not written as a demo. It was built for, and proven on, a real
+migration of a 26-year law-office mail archive:
+
+- **301,118 unique messages / 67 GB** converted into six PSTs in a single run.
+- Reconciled against a manifest end to end: every source message is accounted
+  for in a PST — 298,202 converted normally, 2,916 preserved as fallback
+  attachments (genuinely malformed sources), **0 lost**.
+- Hebrew subjects, bodies, folder names and attachment filenames verified in
+  Outlook, including `windows-1255` and RFC 2047 encoded headers.
+- Exercised against both a 32-bit and a 64-bit classic Outlook (Microsoft 365
+  Click-to-Run), on Windows 10 and Windows 11.
+- Source files were never modified.
+
+The verification record — including the Click-to-Run converter defect, how it
+was diagnosed, and why the tool drives Windows' own MimeOle engine — is in
+[`docs/verification/`](docs/verification/).
+
+## Credits
+
+Developed by **Natanor IT Services** — <https://natanor.co.il>
+
+Licensed under the [MIT License](LICENSE). Uses the SQLite amalgamation
+(public domain) and Microsoft's Extended MAPI headers from the MAPI Stub
+Library (MIT); see [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+
