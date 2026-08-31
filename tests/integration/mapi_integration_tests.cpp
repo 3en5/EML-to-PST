@@ -395,19 +395,25 @@ void read_addressing(mapi::MapiRuntime& runtime, IMessage& msg, RawMessageProps&
     enum { kType, kName, kEmail, kEntry, kCols };
     SizedSPropTagArray(kCols, cols) = {kCols, {PR_RECIPIENT_TYPE, PR_DISPLAY_NAME_W, PR_EMAIL_ADDRESS_W, PR_ENTRYID}};
     if (FAILED(table->SetColumns(reinterpret_cast<LPSPropTagArray>(&cols), 0))) return;
-    LPSRowSet rows = nullptr;
-    if (FAILED(table->QueryRows(64, 0, &rows))) return;
-    mapi::RowSetGuard rguard(rows, runtime.MAPIFreeBuffer);
-    if (!rows) return;
-    for (ULONG i = 0; i < rows->cRows; ++i) {
-        const SPropValue* p = rows->aRow[i].lpProps;
-        std::string type = "?";
-        if (PROP_TYPE(p[kType].ulPropTag) == PT_LONG)
-            type = p[kType].Value.l == MAPI_TO ? "TO" : p[kType].Value.l == MAPI_CC ? "CC" : p[kType].Value.l == MAPI_BCC ? "BCC" : "?";
-        std::string name  = PROP_TYPE(p[kName].ulPropTag) == PT_UNICODE ? utf8_from_wide(p[kName].Value.lpszW) : "<none>";
-        std::string email = PROP_TYPE(p[kEmail].ulPropTag) == PT_UNICODE ? utf8_from_wide(p[kEmail].Value.lpszW) : "<NO EMAIL PROP>";
-        std::string eid   = PROP_TYPE(p[kEntry].ulPropTag) == PT_BINARY ? "entryid=yes(" + std::to_string(p[kEntry].Value.bin.cb) + "b)" : "entryid=NO";
-        out.recipients.push_back(type + " " + name + " <" + email + "> " + eid);
+    // Page until the table is exhausted: a single QueryRows call returns at
+    // most the requested count, so a fixed 64 would silently hide the tail of
+    // a large distribution list and make the audit look clean.
+    for (;;) {
+        LPSRowSet rows = nullptr;
+        if (FAILED(table->QueryRows(64, 0, &rows))) return;
+        mapi::RowSetGuard rguard(rows, runtime.MAPIFreeBuffer);
+        if (!rows) return;
+        if (rows->cRows == 0) return;
+        for (ULONG i = 0; i < rows->cRows; ++i) {
+            const SPropValue* p = rows->aRow[i].lpProps;
+            std::string type = "?";
+            if (PROP_TYPE(p[kType].ulPropTag) == PT_LONG)
+                type = p[kType].Value.l == MAPI_TO ? "TO" : p[kType].Value.l == MAPI_CC ? "CC" : p[kType].Value.l == MAPI_BCC ? "BCC" : "?";
+            std::string name  = PROP_TYPE(p[kName].ulPropTag) == PT_UNICODE ? utf8_from_wide(p[kName].Value.lpszW) : "<none>";
+            std::string email = PROP_TYPE(p[kEmail].ulPropTag) == PT_UNICODE ? utf8_from_wide(p[kEmail].Value.lpszW) : "<NO EMAIL PROP>";
+            std::string eid   = PROP_TYPE(p[kEntry].ulPropTag) == PT_BINARY ? "entryid=yes(" + std::to_string(p[kEntry].Value.bin.cb) + "b)" : "entryid=NO";
+            out.recipients.push_back(type + " " + name + " <" + email + "> " + eid);
+        }
     }
 }
 
