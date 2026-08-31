@@ -198,6 +198,8 @@ struct RawMessageProps {
     bool has_attach = false;
     ULONG attach_count = 0;
     std::vector<std::wstring> attachment_names;
+    std::wstring sender_name, sender_email;
+    std::vector<std::string> recipients;
     // Self-describing read log: per-property status, so a failing CHECK shows
     // WHAT was actually read (or which HRESULT blocked reading it).
     std::string diagnostics;
@@ -221,6 +223,8 @@ std::string render_raw(const RawMessageProps& p) {
     s += " has_attach=" + std::string(p.has_attach ? "true" : "false");
     s += " attach_count=" + std::to_string(p.attach_count);
     for (const auto& n : p.attachment_names) s += " attach='" + utf8_from_wide(n) + "'";
+    s += " from='" + utf8_from_wide(p.sender_name) + " <" + utf8_from_wide(p.sender_email) + ">'";
+    for (const auto& r : p.recipients) s += " rcpt[" + r + "]";
     if (!p.diagnostics.empty()) s += " |reads:" + p.diagnostics;
     return s;
 }
@@ -366,6 +370,37 @@ Result<mapi::MapiPtr<IMessage>> open_message(IMsgStore& store, const EntryId& en
     return msg;
 }
 
+void read_addressing(mapi::MapiRuntime& runtime, IMessage& msg, RawMessageProps& out) {
+    SizedSPropTagArray(2, stags) = {2, {PR_SENDER_NAME_W, PR_SENDER_EMAIL_ADDRESS_W}};
+    ULONG n = 0; LPSPropValue v = nullptr;
+    HRESULT hr = msg.GetProps(reinterpret_cast<LPSPropTagArray>(&stags), 0, &n, &v);
+    mapi::MapiBuffer sguard(runtime.MAPIFreeBuffer); *sguard.put() = v;
+    if (!FAILED(hr) && n >= 2) {
+        if (PROP_TYPE(v[0].ulPropTag) == PT_UNICODE) out.sender_name = v[0].Value.lpszW;
+        if (PROP_TYPE(v[1].ulPropTag) == PT_UNICODE) out.sender_email = v[1].Value.lpszW;
+    }
+    mapi::MapiPtr<IMAPITable> table;
+    hr = msg.GetRecipientTable(MAPI_UNICODE, table.put());
+    if (FAILED(hr) || !table) { out.diagnostics += " rcpttable:err=" + hex32(hr); return; }
+    enum { kType, kName, kEmail, kEntry, kCols };
+    SizedSPropTagArray(kCols, cols) = {kCols, {PR_RECIPIENT_TYPE, PR_DISPLAY_NAME_W, PR_EMAIL_ADDRESS_W, PR_ENTRYID}};
+    if (FAILED(table->SetColumns(reinterpret_cast<LPSPropTagArray>(&cols), 0))) return;
+    LPSRowSet rows = nullptr;
+    if (FAILED(table->QueryRows(64, 0, &rows))) return;
+    mapi::RowSetGuard rguard(rows, runtime.MAPIFreeBuffer);
+    if (!rows) return;
+    for (ULONG i = 0; i < rows->cRows; ++i) {
+        const SPropValue* p = rows->aRow[i].lpProps;
+        std::string type = "?";
+        if (PROP_TYPE(p[kType].ulPropTag) == PT_LONG)
+            type = p[kType].Value.l == MAPI_TO ? "TO" : p[kType].Value.l == MAPI_CC ? "CC" : p[kType].Value.l == MAPI_BCC ? "BCC" : "?";
+        std::string name  = PROP_TYPE(p[kName].ulPropTag) == PT_UNICODE ? utf8_from_wide(p[kName].Value.lpszW) : "<none>";
+        std::string email = PROP_TYPE(p[kEmail].ulPropTag) == PT_UNICODE ? utf8_from_wide(p[kEmail].Value.lpszW) : "<NO EMAIL PROP>";
+        std::string eid   = PROP_TYPE(p[kEntry].ulPropTag) == PT_BINARY ? "entryid=yes(" + std::to_string(p[kEntry].Value.bin.cb) + "b)" : "entryid=NO";
+        out.recipients.push_back(type + " " + name + " <" + email + "> " + eid);
+    }
+}
+
 Result<RawMessageProps> read_one_raw_message(mapi::MapiRuntime& runtime, IMsgStore& store,
                                              const EntryId& entry_id) {
     auto message = open_message(store, entry_id);
@@ -392,6 +427,7 @@ Result<RawMessageProps> read_one_raw_message(mapi::MapiRuntime& runtime, IMsgSto
     }
 
     read_attachments(runtime, msg, out);
+    read_addressing(runtime, msg, out);
     return out;
 }
 
