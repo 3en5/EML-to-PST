@@ -44,6 +44,10 @@ using namespace wlm2pst;
 
 namespace {
 
+#ifndef PR_SENDER_ENTRYID
+#define PR_SENDER_ENTRYID PROP_TAG(PT_BINARY, 0x0C19)
+#endif
+
 // ---------------------------------------------------------------------------
 // Shared scaffolding
 // ---------------------------------------------------------------------------
@@ -371,13 +375,19 @@ Result<mapi::MapiPtr<IMessage>> open_message(IMsgStore& store, const EntryId& en
 }
 
 void read_addressing(mapi::MapiRuntime& runtime, IMessage& msg, RawMessageProps& out) {
-    SizedSPropTagArray(2, stags) = {2, {PR_SENDER_NAME_W, PR_SENDER_EMAIL_ADDRESS_W}};
+    SizedSPropTagArray(3, stags) = {
+        3, {PR_SENDER_NAME_W, PR_SENDER_EMAIL_ADDRESS_W, PR_SENDER_ENTRYID}};
     ULONG n = 0; LPSPropValue v = nullptr;
     HRESULT hr = msg.GetProps(reinterpret_cast<LPSPropTagArray>(&stags), 0, &n, &v);
     mapi::MapiBuffer sguard(runtime.MAPIFreeBuffer); *sguard.put() = v;
-    if (!FAILED(hr) && n >= 2) {
+    if (!FAILED(hr) && n >= 3) {
         if (PROP_TYPE(v[0].ulPropTag) == PT_UNICODE) out.sender_name = v[0].Value.lpszW;
         if (PROP_TYPE(v[1].ulPropTag) == PT_UNICODE) out.sender_email = v[1].Value.lpszW;
+        // Without a sender entry id Outlook treats the From line as
+        // unresolved: no address shown, nothing to reply to.
+        out.diagnostics += PROP_TYPE(v[2].ulPropTag) == PT_BINARY
+                               ? " sender-entryid=yes(" + std::to_string(v[2].Value.bin.cb) + "b)"
+                               : " sender-entryid=NO";
     }
     mapi::MapiPtr<IMAPITable> table;
     hr = msg.GetRecipientTable(MAPI_UNICODE, table.put());
