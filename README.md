@@ -12,7 +12,9 @@ wlm2pst.exe --source "C:\Mail\Windows Live Mail" --output "D:\Migration\Sample-M
 
 - Recursively scans a source folder for `.eml` files.
 - Recreates the source folder structure as ordinary PST folders under one
-  root folder (default name `Windows Live Mail`, or `--root-name`).
+  root folder (default name `Windows Live Mail`, or `--root-name`), dropping
+  Windows Live Mail's own container folders so mail is not buried levels deep
+  (`--no-flatten` keeps the tree verbatim).
 - Imports every EML into the PST through classic Outlook's own MIME-to-MAPI
   converter (`IConverterSession::MIMEToMAPI`), so the parsing behavior is
   Outlook's, not a reimplementation.
@@ -128,6 +130,10 @@ wlm2pst.exe --source "C:\OldMail" --output "D:\Migration\OldMail.pst" --resume
 --output <file.pst>        Required. Path to a new PST file.
 --root-name <name>         Optional. Root folder name inside the PST.
                             Default: Windows Live Mail
+--no-flatten               Keep the source folder tree exactly as it is.
+--flatten-also <name>      Treat <name> as a container folder too and drop it
+                            from the path. Trailing '*' matches a prefix.
+                            May be repeated.
 --resume                   Resume a compatible interrupted job.
 --overwrite                Delete a previous tool-owned output and start again.
 --quiet                    Show only errors and final summary.
@@ -146,6 +152,34 @@ Rules worth knowing:
   `--overwrite` only ever deletes files it can prove it created itself (see
   Output files, below).
 - `--resume` and `--overwrite` are mutually exclusive.
+- A resume must use the same flattening settings as the interrupted run;
+  otherwise one PST would end up with two different folder layouts, so the
+  resume is rejected.
+
+### Folder flattening
+
+Windows Live Mail buries mail under its own bookkeeping folders. A single
+message can sit under `Storage Folders (1)` > `Recovered Items` >
+`25-12-2023   f3` > `Storage Folders` > `Inbox` > `clients` > `Field` - four
+of those seven levels carry no information.
+
+By default WLM2PST drops such segments, so that message lands in
+`Inbox` > `clients` > `Field`. The segments dropped are Windows Live Mail's
+own containers - `Storage Folders`, `Imported Folder`, `Recovered Items` (in
+English or Hebrew, with or without a `(n)` suffix) and per-recovery
+timestamp folders such as `25-12-2023   f3` or `2023-12-25-074633`.
+
+Two further rules:
+
+- Folders differing only in letter case merge into one. Windows Live Mail
+  happily creates both `Sent Items` and `Sent items`; a PST should not.
+- Per-account containers are not guessed, because their names are
+  site-specific. Pass them with `--flatten-also`, for example
+  `--flatten-also "Zahav.net*"`.
+
+Nothing is discarded: only container *folders* disappear, and every message
+keeps its position relative to every folder a person actually named. Use
+`--no-flatten` to reproduce the source tree verbatim instead.
 
 ## Output files
 

@@ -32,6 +32,10 @@ struct JobInfo {
     std::string outlook_bitness;  // "x86" or "x64".
     FileTimeUtc created_at_utc = 0;
     std::string manifest_hash;  // Lowercase hex SHA-256 of the source manifest.
+    // Canonical description of the folder-flattening settings the job ran
+    // with. Resuming with different settings would mix two folder layouts in
+    // one PST, so it is compared like any other job parameter.
+    std::string folder_layout;
 };
 
 // Everything load_job() can tell the caller about the persisted job row.
@@ -42,7 +46,7 @@ struct LoadedJob {
 };
 
 // The current schema version this build of WLM2PST writes/expects.
-constexpr int kStateDbSchemaVersion = 1;
+constexpr int kStateDbSchemaVersion = 2;
 
 // Owns one SQLite connection to a job's resume state database
 // (`<output>.wlm2pst-state.sqlite`). Movable, non-copyable.

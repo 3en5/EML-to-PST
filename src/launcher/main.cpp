@@ -56,6 +56,13 @@ void print_help() {
     write_out(L"Options:");
     write_out(L"  --root-name <name>     Root folder name inside the PST.");
     write_out(L"                         Default: Windows Live Mail");
+    write_out(L"  --no-flatten           Keep the source folder tree exactly as it is. By");
+    write_out(L"                         default Windows Live Mail container folders are");
+    write_out(L"                         dropped from the path and folders differing only");
+    write_out(L"                         in letter case are merged.");
+    write_out(L"  --flatten-also <name>  Treat <name> as a container folder too and drop it");
+    write_out(L"                         from the path. Trailing '*' matches a prefix.");
+    write_out(L"                         May be given more than once.");
     write_out(L"  --resume               Resume a compatible interrupted job.");
     write_out(L"  --overwrite            Delete a previous tool-owned output and start again.");
     write_out(L"  --quiet                Show only errors and final summary.");

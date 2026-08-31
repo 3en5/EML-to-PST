@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (sixth round - usable output)
+
+- **Recipient and sender addresses are now real MAPI addresses.** Recipient
+  rows previously carried a display name, an address type and an address, but
+  no `PR_ENTRYID` - which makes them *unresolved* recipients, so Outlook shows
+  only the display name and has no address object behind it. Recipients now
+  carry a one-off `PR_ENTRYID`, so the SMTP address is visible and usable
+  (reply, copy address, address-book lookup).
+- **Folder flattening** (`src/worker/folder_mapping/folder_collapse.*`):
+  Windows Live Mail's own container folders (`Storage Folders`,
+  `Imported Folder`, `Recovered Items`, in English or Hebrew, and per-recovery
+  timestamp folders such as `25-12-2023   f3`) are dropped from the folder
+  path, and folders differing only in letter case are merged. On a real
+  301,118-message archive this took the deepest path from 8 levels to 5 and
+  removed 4 levels from the most common one. New options: `--no-flatten` to
+  keep the source tree verbatim, and `--flatten-also <name>` (repeatable,
+  trailing `*` matches a prefix) for site-specific containers such as
+  per-account folders.
+
+### Changed
+
+- State database schema version 2: the job row records the folder-flattening
+  settings, so a `--resume` with different settings is rejected instead of
+  mixing two folder layouts in one PST. Databases from earlier versions are
+  reported as incompatible.
+
 ### Added (fifth round - second conversion engine)
 
 - **MimeOle import engine** (`src/worker/mapi/mimeole_importer.*`): a full

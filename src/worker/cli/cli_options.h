@@ -19,6 +19,10 @@ struct CliOptions {
     std::wstring source;      // required for conversion
     std::wstring output;      // required for conversion
     std::wstring root_name = L"Windows Live Mail";
+    // Folder-tree flattening (spec section 9): drop Windows Live Mail's own
+    // container folders so real mail is not buried levels deep.
+    bool flatten_containers = true;
+    std::vector<std::wstring> flatten_also;  // extra container names, '*' suffix allowed
     bool resume = false;
     bool overwrite = false;
     bool quiet = false;
