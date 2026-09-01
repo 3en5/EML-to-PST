@@ -65,6 +65,14 @@ std::wstring to_extended_length_path(std::wstring path) {
     return path;
 }
 
+std::wstring file_stem_of(std::wstring_view path) {
+    size_t slash = path.find_last_of(L"\\/");
+    std::wstring_view name = slash == std::wstring_view::npos ? path : path.substr(slash + 1);
+    size_t dot = name.find_last_of(L'.');
+    if (dot != std::wstring_view::npos && dot > 0) name = name.substr(0, dot);
+    return std::wstring(name);
+}
+
 bool has_pst_extension(std::wstring_view path) noexcept {
     constexpr std::wstring_view kExt = L".pst";
     if (path.size() < kExt.size()) return false;

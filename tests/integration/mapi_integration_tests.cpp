@@ -32,6 +32,7 @@
 #include "common/errors/result.h"
 #include "common/hashing/sha256.h"
 #include "common/model.h"
+#include "common/paths/path_utils.h"
 #include "common/unicode/utf.h"
 #include "worker/import_engine.h"
 #include "worker/mapi/mapi_constants.h"
@@ -179,7 +180,7 @@ Result<std::unique_ptr<RawSession>> reopen_raw(const std::wstring& pst_path) {
 
     auto profile = mapi::TemporaryProfile::create(rs->runtime, "WLM2PST-ITEST-");
     if (!profile.ok()) return profile.error();
-    if (Status s = profile.value()->add_unicode_pst_service(pst_path, L"WLM2PST Integration Verify");
+    if (Status s = profile.value()->add_unicode_pst_service(pst_path, file_stem_of(pst_path));
         !s.ok()) {
         (void)profile.value()->remove();
         return s.error();
