@@ -1,5 +1,7 @@
 #include "worker/mapi/mimeole_importer.h"
 
+#include "worker/addressing/one_off_entryid.h"
+
 #include "common/logging/logger.h"
 #include "common/unicode/utf.h"
 #include "worker/mapi/mapi_compat.h"
@@ -215,47 +217,6 @@ std::vector<ParsedAddress> collect_addresses(IMimeMessage& mime, DWORD address_t
     return out;
 }
 
-// Builds a MAPI one-off ENTRYID for an SMTP address.
-//
-// A recipient row without PR_ENTRYID is an *unresolved* recipient: Outlook
-// shows the display name and has no address object behind it, so the e-mail
-// address never appears in the UI even though PR_EMAIL_ADDRESS is set. The
-// one-off entry ID is what turns a name+address pair into a real, resolvable
-// recipient (and is what makes Reply / Reply All work).
-//
-// Layout (documented one-off ENTRYID):
-//   ULONG   flags = 0
-//   MAPIUID one-off provider {A41F2B81-A3BE-1910-9D6E-00DD010F5402}
-//   ULONG   version(0) | MAPI_ONE_OFF_UNICODE | MAPI_SEND_NO_RICH_INFO
-//   WCHAR   display name, addrtype, address - each NUL terminated
-std::vector<BYTE> build_one_off_entryid(const std::wstring& display_name,
-                                        const std::wstring& address) {
-    static const BYTE kOneOffUid[16] = {0x81, 0x2B, 0x1F, 0xA4, 0xBE, 0xA3, 0x10, 0x19,
-                                        0x9D, 0x6E, 0x00, 0xDD, 0x01, 0x0F, 0x54, 0x02};
-    const std::wstring addrtype = L"SMTP";
-    const ULONG flags = 0;
-    // MAPI_ONE_OFF_UNICODE (0x8000) | MAPI_SEND_NO_RICH_INFO (0x0001)
-    const ULONG version_flags = 0x00008000UL | 0x00000001UL;
-
-    auto append = [](std::vector<BYTE>& v, const void* data, size_t bytes) {
-        const BYTE* p = static_cast<const BYTE*>(data);
-        v.insert(v.end(), p, p + bytes);
-    };
-    auto append_wide = [&](std::vector<BYTE>& v, const std::wstring& s) {
-        append(v, s.c_str(), (s.size() + 1) * sizeof(wchar_t));  // includes the NUL
-    };
-
-    std::vector<BYTE> eid;
-    eid.reserve(64 + (display_name.size() + addrtype.size() + address.size()) * sizeof(wchar_t));
-    append(eid, &flags, sizeof(flags));
-    append(eid, kOneOffUid, sizeof(kOneOffUid));
-    append(eid, &version_flags, sizeof(version_flags));
-    append_wide(eid, display_name);
-    append_wide(eid, addrtype);
-    append_wide(eid, address);
-    return eid;
-}
-
 // Builds and applies the MAPI recipient table.
 Status add_recipients(IMessage& msg, MapiRuntime& runtime,
                       const std::vector<std::pair<LONG, ParsedAddress>>& recipients) {
@@ -309,7 +270,7 @@ Status add_recipients(IMessage& msg, MapiRuntime& runtime,
         // PR_ENTRYID: without it the row is an unresolved recipient and Outlook
         // shows only the display name (see build_one_off_entryid).
         const std::wstring display = address.name.empty() ? address.email : address.name;
-        std::vector<BYTE> eid = build_one_off_entryid(display, address.email);
+        std::vector<std::uint8_t> eid = build_one_off_entryid(display, address.email);
         LPBYTE eid_buf = nullptr;
         if (runtime.MAPIAllocateMore(static_cast<ULONG>(eid.size()), adrlist,
                                      reinterpret_cast<LPVOID*>(&eid_buf)) != S_OK) {
@@ -519,7 +480,7 @@ Status MimeOleImporter::import(IStream& eml, IMessage& msg, MapiRuntime& runtime
         // unresolved: the address is not shown and Reply has nowhere to go.
         // Same reasoning as the recipient rows - see build_one_off_entryid.
         const std::wstring sender_display = sender.name.empty() ? sender.email : sender.name;
-        std::vector<BYTE> sender_eid = build_one_off_entryid(sender_display, sender.email);
+        std::vector<std::uint8_t> sender_eid = build_one_off_entryid(sender_display, sender.email);
         SPropValue props[10]{};
         props[0].ulPropTag = PR_SENDER_NAME_W;
         props[0].Value.lpszW = const_cast<LPWSTR>(sender_display.c_str());
