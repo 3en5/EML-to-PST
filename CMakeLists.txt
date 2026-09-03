@@ -7,7 +7,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(WLM2PST
-    VERSION 1.0.0
+    VERSION 1.1.0
     DESCRIPTION "Convert a Windows Live Mail .eml folder tree into one Unicode PST"
     LANGUAGES C CXX)
 
