@@ -9,6 +9,7 @@
 #include "common/version/version.h"
 #include "worker/cancellation/cancel_token.h"
 #include "worker/cli/cli_options.h"
+#include "worker/folder_mapping/folder_collapse.h"
 #include "worker/folder_mapping/folder_mapper.h"
 #include "worker/pipeline/import_pipeline.h"
 #include "worker/reporting/errors_csv.h"
@@ -233,13 +234,40 @@ int run_worker_app(const std::vector<std::wstring>& args,
     std::set<std::wstring> dirs_set;
     for (const auto& entry : scanned.entries) dirs_set.insert(parent_dir_of(entry.relative_path));
     std::vector<std::wstring> dirs(dirs_set.begin(), dirs_set.end());
-    auto plan = build_folder_plan(dirs);
+
+    // Collapse Windows Live Mail's own container folders before planning, so
+    // the plan is built over the logical tree a person navigates. Several
+    // source directories may collapse onto one logical path; they then share a
+    // single PST folder.
+    CollapseOptions collapse_options;
+    collapse_options.collapse_builtin_containers = options.flatten_containers;
+    collapse_options.extra_patterns = options.flatten_also;
+    collapse_options.merge_case_variants = options.flatten_containers;
+    const std::map<std::wstring, std::wstring> collapsed = build_collapse_map(dirs, collapse_options);
+
+    std::set<std::wstring> logical_set;
+    for (const auto& [source_dir, logical] : collapsed) logical_set.insert(logical);
+    std::vector<std::wstring> logical_dirs(logical_set.begin(), logical_set.end());
+
+    auto plan = build_folder_plan(logical_dirs);
     if (!plan.ok()) {
         return fail(ExitCode::kInvalidSource, "folder mapping failed: " + describe(plan.error()));
     }
-    std::map<std::wstring, std::wstring> source_to_target;  // source rel dir -> target rel folder
+    std::map<std::wstring, std::wstring> logical_to_target;
     for (const auto& mapped : plan.value().folders) {
-        source_to_target[mapped.source_relative] = join_target(mapped.target_segments);
+        logical_to_target[mapped.source_relative] = join_target(mapped.target_segments);
+    }
+    std::map<std::wstring, std::wstring> source_to_target;  // source rel dir -> target rel folder
+    for (const auto& [source_dir, logical] : collapsed) {
+        auto it = logical_to_target.find(logical);
+        if (it == logical_to_target.end()) {
+            return fail(ExitCode::kInvalidSource, "folder mapping failed: unplanned folder");
+        }
+        source_to_target[source_dir] = it->second;
+    }
+    if (size_t merged = dirs.size() - logical_set.size(); merged > 0) {
+        global_logger().info("folder flattening merged " + std::to_string(merged) +
+                             " container/case-variant folder(s)");
     }
 
     // ---- Job setup: resume or new ----
@@ -264,6 +292,7 @@ int run_worker_app(const std::vector<std::wstring>& args,
         expected.output_pst = options.output;
         expected.root_name = options.root_name;
         expected.outlook_bitness = kBuildArch;
+        expected.folder_layout = describe_collapse_options(collapse_options);
         Status compat = db->check_resume_compatible(expected, manifest_hash, kStateDbSchemaVersion);
         if (!compat.ok()) {
             bool source_changed =
@@ -294,6 +323,7 @@ int run_worker_app(const std::vector<std::wstring>& args,
         info.outlook_bitness = kBuildArch;
         info.created_at_utc = started_at;
         info.manifest_hash = manifest_hash;
+        info.folder_layout = describe_collapse_options(collapse_options);
 
         std::vector<std::pair<std::wstring, std::wstring>> file_targets;
         file_targets.reserve(scanned.entries.size());

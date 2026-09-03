@@ -11,19 +11,22 @@ namespace {
 
 // Every token this parser understands, normalized to a canonical key used
 // for duplicate detection ("-h" and "--help" collide on purpose).
-enum class OptionKind { kSource, kOutput, kRootName, kResume, kOverwrite, kQuiet, kVerbose, kHelp, kVersion };
+enum class OptionKind { kSource, kOutput, kRootName, kNoFlatten, kFlattenAlso, kResume, kOverwrite, kQuiet, kVerbose, kHelp, kVersion };
 
 struct OptionSpec {
     std::wstring_view flag;
     OptionKind kind;
     bool takes_value;
     const char* canonical;  // duplicate-detection / error-message key
+    bool repeatable = false;
 };
 
 constexpr OptionSpec kOptionTable[] = {
     {L"--source", OptionKind::kSource, true, "--source"},
     {L"--output", OptionKind::kOutput, true, "--output"},
     {L"--root-name", OptionKind::kRootName, true, "--root-name"},
+    {L"--no-flatten", OptionKind::kNoFlatten, false, "--no-flatten"},
+    {L"--flatten-also", OptionKind::kFlattenAlso, true, "--flatten-also", true},
     {L"--resume", OptionKind::kResume, false, "--resume"},
     {L"--overwrite", OptionKind::kOverwrite, false, "--overwrite"},
     {L"--quiet", OptionKind::kQuiet, false, "--quiet"},
@@ -81,7 +84,7 @@ CliParseResult parse_command_line(const std::vector<std::wstring>& args) {
             return fail("unknown option: " + utf8_from_wide(name));
         }
 
-        if (!seen.insert(spec->canonical).second) {
+        if (!seen.insert(spec->canonical).second && !spec->repeatable) {
             return fail(std::string("duplicate option: ") + spec->canonical);
         }
 
@@ -103,6 +106,15 @@ CliParseResult parse_command_line(const std::vector<std::wstring>& args) {
             case OptionKind::kSource: options.source = std::move(value); break;
             case OptionKind::kOutput: options.output = std::move(value); break;
             case OptionKind::kRootName: options.root_name = std::move(value); break;
+            case OptionKind::kNoFlatten: options.flatten_containers = false; break;
+            case OptionKind::kFlattenAlso: {
+                std::wstring pattern = trim_trailing_dots_and_spaces(value);
+                if (pattern.empty()) {
+                    return fail("--flatten-also requires a non-empty folder name");
+                }
+                options.flatten_also.push_back(std::move(pattern));
+                break;
+            }
             case OptionKind::kResume: options.resume = true; break;
             case OptionKind::kOverwrite: options.overwrite = true; break;
             case OptionKind::kQuiet: options.quiet = true; break;
@@ -150,6 +162,15 @@ std::string usage_text() {
         "OPTIONS:\n"
         "  --root-name <name>        Root folder name inside the PST.\n"
         "                             Default: Windows Live Mail\n"
+        "  --no-flatten               Keep the source folder tree exactly as it is.\n"
+        "                             By default Windows Live Mail container folders\n"
+        "                             (Storage Folders, Imported Folder, recovery\n"
+        "                             snapshots) are removed from the path so mail is\n"
+        "                             not buried several levels deep, and folders\n"
+        "                             differing only in letter case are merged.\n"
+        "  --flatten-also <name>      Treat <name> as a container folder too and drop\n"
+        "                             it from the path. A trailing '*' matches a\n"
+        "                             prefix. May be given more than once.\n"
         "  --resume                   Resume a compatible interrupted job.\n"
         "  --overwrite                Delete a previous tool-owned output and start again.\n"
         "  --quiet                    Show only errors and final summary.\n"

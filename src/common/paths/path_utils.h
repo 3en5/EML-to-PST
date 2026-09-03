@@ -32,6 +32,12 @@ std::wstring to_extended_length_path(std::wstring path);
 // Case-insensitive check for a trailing ".pst".
 bool has_pst_extension(std::wstring_view path) noexcept;
 
+// The file name of `path` without its directory or its extension - what a
+// person calls the file. Used as the PST's display name so Outlook's data
+// file list shows the same name the file has on disk, instead of a tool
+// string. Returns an empty string when nothing is left (e.g. ".pst").
+std::wstring file_stem_of(std::wstring_view path);
+
 // Converts '/' to '\\' and collapses runs of consecutive backslashes to a
 // single backslash, except for the mandatory leading "\\" that marks a UNC
 // or \\?\ extended-length path (that leading pair is preserved as-is; any

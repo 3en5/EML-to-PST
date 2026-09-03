@@ -3,6 +3,7 @@
 #include "worker/import_engine.h"
 
 #include "common/logging/logger.h"
+#include "common/paths/path_utils.h"
 #include "common/unicode/utf.h"
 #include "common/version/version.h"
 #include "worker/mapi/mapi_constants.h"
@@ -909,7 +910,11 @@ public:
         auto profile = TemporaryProfile::create(runtime_, prefix);
         if (!profile.ok()) return profile.error();
 
-        if (Status s = profile.value()->add_unicode_pst_service(pst_path, L"WLM2PST Output");
+        // Display name = the file's own name, so Outlook's data-file list
+        // shows what the user sees on disk rather than a tool string.
+        const std::wstring display_name = file_stem_of(pst_path);
+        if (Status s = profile.value()->add_unicode_pst_service(
+                pst_path, display_name.empty() ? L"WLM2PST Output" : display_name);
             !s.ok()) {
             (void)profile.value()->remove();
             return s.error();

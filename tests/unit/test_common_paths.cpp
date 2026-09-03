@@ -6,6 +6,7 @@
 #include "common/paths/path_utils.h"
 
 using wlm2pst::drive_letter_of;
+using wlm2pst::file_stem_of;
 using wlm2pst::has_pst_extension;
 using wlm2pst::is_extended_length_path;
 using wlm2pst::is_lexically_within;
@@ -104,4 +105,15 @@ TEST_CASE("is_lexically_within uses component containment, not string prefix", "
     CHECK(is_lexically_within(LR"(\\?\UNC\server\share)", LR"(\\server\share\x)"));
 
     CHECK_FALSE(is_lexically_within(LR"(C:\a\b)", LR"(D:\a\b\c)"));  // different drive
+}
+
+TEST_CASE("file_stem_of returns the name a person sees", "[paths]") {
+    CHECK(file_stem_of(LR"(D:\out\prod-v2\Mail Archive 2000-2013.pst)") ==
+          L"Mail Archive 2000-2013");
+    CHECK(file_stem_of(L"archive.pst") == L"archive");
+    CHECK(file_stem_of(L"D:/out/archive.pst") == L"archive");
+    CHECK(file_stem_of(LR"(D:\out\no-extension)") == L"no-extension");
+    CHECK(file_stem_of(LR"(D:\out\two.dots.pst)") == L"two.dots");
+    CHECK(file_stem_of(L".pst") == L".pst");  // nothing but an extension: keep it
+    CHECK(file_stem_of(L"") == L"");
 }

@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (sixth round - usable output)
+
+- **Sender and recipient addresses are real, resolvable MAPI addresses.**
+  Every row carries a one-off `PR_ENTRYID` with the documented byte layout, so
+  the SMTP address is visible and usable - reply, copy address, Add to
+  Contacts. The sender gets `PR_SENDER_ENTRYID`,
+  `PR_SENT_REPRESENTING_ENTRYID` and the SMTP-address properties as well; the
+  address stands in as display name when the EML carried none.
+  The entry-id builder lives in `worker/addressing/one_off_entryid.*`, free of
+  MAPI headers, and its byte layout is asserted field by field in unit tests -
+  writing the 16-bit version and flags fields as one 32-bit value leaves the
+  Unicode flag unset, which still renders correctly in Outlook but makes every
+  operation that opens the address entry fail with `MAPI_E_NO_SUPPORT`.
+- **The PST is named after its file.** Outlook shows a data file by the
+  display name stored inside it; that was a fixed tool string, so every
+  archive appeared as "WLM2PST Output". `file_stem_of()` now supplies it for
+  both the conversion output and the integration verifier, so inspecting a PST
+  can no longer rename it.
+- **Folder flattening** (`src/worker/folder_mapping/folder_collapse.*`):
+  Windows Live Mail's own container folders (`Storage Folders`,
+  `Imported Folder`, `Recovered Items`, in English or Hebrew, and per-recovery
+  timestamp folders such as `25-12-2023   f3`) are dropped from the folder
+  path, and folders differing only in letter case are merged. On a real
+  301,118-message archive this took the deepest path from 8 levels to 5 and
+  removed 4 levels from the most common one. New options: `--no-flatten` to
+  keep the source tree verbatim, and `--flatten-also <name>` (repeatable,
+  trailing `*` matches a prefix) for site-specific containers such as
+  per-account folders.
+
+### Changed
+
+- State database schema version 2: the job row records the folder-flattening
+  settings, so a `--resume` with different settings is rejected instead of
+  mixing two folder layouts in one PST. Databases from earlier versions are
+  reported as incompatible.
+
 ### Added (fifth round - second conversion engine)
 
 - **MimeOle import engine** (`src/worker/mapi/mimeole_importer.*`): a full

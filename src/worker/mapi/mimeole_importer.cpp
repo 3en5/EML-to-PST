@@ -1,5 +1,7 @@
 #include "worker/mapi/mimeole_importer.h"
 
+#include "worker/addressing/one_off_entryid.h"
+
 #include "common/logging/logger.h"
 #include "common/unicode/utf.h"
 #include "worker/mapi/mapi_compat.h"
@@ -54,6 +56,18 @@ namespace {
 #endif
 #ifndef PR_SENT_REPRESENTING_ADDRTYPE_W
 #define PR_SENT_REPRESENTING_ADDRTYPE_W PROP_TAG(PT_UNICODE, 0x0064)
+#endif
+#ifndef PR_SENDER_ENTRYID
+#define PR_SENDER_ENTRYID PROP_TAG(PT_BINARY, 0x0C19)
+#endif
+#ifndef PR_SENT_REPRESENTING_ENTRYID
+#define PR_SENT_REPRESENTING_ENTRYID PROP_TAG(PT_BINARY, 0x0041)
+#endif
+#ifndef PR_SENDER_SMTP_ADDRESS_W
+#define PR_SENDER_SMTP_ADDRESS_W PROP_TAG(PT_UNICODE, 0x5D01)
+#endif
+#ifndef PR_SENT_REPRESENTING_SMTP_ADDRESS_W
+#define PR_SENT_REPRESENTING_SMTP_ADDRESS_W PROP_TAG(PT_UNICODE, 0x5D02)
 #endif
 #ifndef PR_EMAIL_ADDRESS_W
 #define PR_EMAIL_ADDRESS_W PROP_TAG(PT_UNICODE, 0x3003)
@@ -223,7 +237,7 @@ Status add_recipients(IMessage& msg, MapiRuntime& runtime,
     static wchar_t kSmtp[] = L"SMTP";
     for (size_t i = 0; i < recipients.size(); ++i) {
         const auto& [recipient_type, address] = recipients[i];
-        constexpr ULONG kProps = 5;
+        constexpr ULONG kProps = 6;
         LPSPropValue values = nullptr;
         if (runtime.MAPIAllocateMore(kProps * sizeof(SPropValue), adrlist,
                                      reinterpret_cast<LPVOID*>(&values)) != S_OK) {
@@ -252,6 +266,20 @@ Status add_recipients(IMessage& msg, MapiRuntime& runtime,
         values[3].Value.lpszW = kSmtp;
         values[4].ulPropTag = PR_SMTP_ADDRESS_W;
         values[4].Value.lpszW = email;
+
+        // PR_ENTRYID: without it the row is an unresolved recipient and Outlook
+        // shows only the display name (see build_one_off_entryid).
+        const std::wstring display = address.name.empty() ? address.email : address.name;
+        std::vector<std::uint8_t> eid = build_one_off_entryid(display, address.email);
+        LPBYTE eid_buf = nullptr;
+        if (runtime.MAPIAllocateMore(static_cast<ULONG>(eid.size()), adrlist,
+                                     reinterpret_cast<LPVOID*>(&eid_buf)) != S_OK) {
+            return make_error("MAPIAllocateMore", "recipient entry id allocation failed");
+        }
+        std::memcpy(eid_buf, eid.data(), eid.size());
+        values[5].ulPropTag = PR_ENTRYID;
+        values[5].Value.bin.cb = static_cast<ULONG>(eid.size());
+        values[5].Value.bin.lpb = eid_buf;
 
         adrlist->aEntries[i].ulReserved1 = 0;
         adrlist->aEntries[i].cValues = kProps;
@@ -447,20 +475,36 @@ Status MimeOleImporter::import(IStream& eml, IMessage& msg, MapiRuntime& runtime
     if (!from.empty()) {
         const ParsedAddress& sender = from.front();
         static wchar_t kSmtp[] = L"SMTP";
-        SPropValue props[6]{};
+        // Outlook resolves the From line through the sender's entry id. With
+        // only a name, an address type and an address, the sender is
+        // unresolved: the address is not shown and Reply has nowhere to go.
+        // Same reasoning as the recipient rows - see build_one_off_entryid.
+        const std::wstring sender_display = sender.name.empty() ? sender.email : sender.name;
+        std::vector<std::uint8_t> sender_eid = build_one_off_entryid(sender_display, sender.email);
+        SPropValue props[10]{};
         props[0].ulPropTag = PR_SENDER_NAME_W;
-        props[0].Value.lpszW = const_cast<LPWSTR>(sender.name.c_str());
+        props[0].Value.lpszW = const_cast<LPWSTR>(sender_display.c_str());
         props[1].ulPropTag = PR_SENDER_EMAIL_ADDRESS_W;
         props[1].Value.lpszW = const_cast<LPWSTR>(sender.email.c_str());
         props[2].ulPropTag = PR_SENDER_ADDRTYPE_W;
         props[2].Value.lpszW = kSmtp;
         props[3].ulPropTag = PR_SENT_REPRESENTING_NAME_W;
-        props[3].Value.lpszW = const_cast<LPWSTR>(sender.name.c_str());
+        props[3].Value.lpszW = const_cast<LPWSTR>(sender_display.c_str());
         props[4].ulPropTag = PR_SENT_REPRESENTING_EMAIL_ADDRESS_W;
         props[4].Value.lpszW = const_cast<LPWSTR>(sender.email.c_str());
         props[5].ulPropTag = PR_SENT_REPRESENTING_ADDRTYPE_W;
         props[5].Value.lpszW = kSmtp;
-        hr = msg.SetProps(6, props, nullptr);
+        props[6].ulPropTag = PR_SENDER_ENTRYID;
+        props[6].Value.bin.cb = static_cast<ULONG>(sender_eid.size());
+        props[6].Value.bin.lpb = sender_eid.data();
+        props[7].ulPropTag = PR_SENT_REPRESENTING_ENTRYID;
+        props[7].Value.bin.cb = static_cast<ULONG>(sender_eid.size());
+        props[7].Value.bin.lpb = sender_eid.data();
+        props[8].ulPropTag = PR_SENDER_SMTP_ADDRESS_W;
+        props[8].Value.lpszW = const_cast<LPWSTR>(sender.email.c_str());
+        props[9].ulPropTag = PR_SENT_REPRESENTING_SMTP_ADDRESS_W;
+        props[9].Value.lpszW = const_cast<LPWSTR>(sender.email.c_str());
+        hr = msg.SetProps(10, props, nullptr);
         if (FAILED(hr)) {
             return make_hresult_error(static_cast<int32_t>(hr), "IMessage::SetProps(sender)");
         }

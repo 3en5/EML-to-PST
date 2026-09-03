@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS job (
     created_at_utc INTEGER NOT NULL,
     last_updated_at_utc INTEGER NOT NULL,
     manifest_hash TEXT NOT NULL,
+    folder_layout TEXT NOT NULL,
     status TEXT NOT NULL
 );
 
@@ -148,8 +149,9 @@ Result<StateDb> StateDb::create_new(
     Result<sqlite_util::Statement> job_stmt_result = sqlite_util::Statement::prepare(
         db.db_,
         "INSERT INTO job(id, run_id, schema_version, tool_version, source_root, output_pst, "
-        "root_name, outlook_bitness, created_at_utc, last_updated_at_utc, manifest_hash, status) "
-        "VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);");
+        "root_name, outlook_bitness, created_at_utc, last_updated_at_utc, manifest_hash, "
+        "folder_layout, status) "
+        "VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12);");
     if (!job_stmt_result) return job_stmt_result.error();
     sqlite_util::Statement job_stmt = std::move(job_stmt_result.value());
 
@@ -164,7 +166,8 @@ Result<StateDb> StateDb::create_new(
     if (!(s = job_stmt.bind_int64(8, info.created_at_utc))) return s.error();
     if (!(s = job_stmt.bind_int64(9, info.created_at_utc))) return s.error();
     if (!(s = job_stmt.bind_text_utf8(10, info.manifest_hash))) return s.error();
-    if (!(s = job_stmt.bind_text_utf8(11, "RUNNING"))) return s.error();
+    if (!(s = job_stmt.bind_text_utf8(11, info.folder_layout))) return s.error();
+    if (!(s = job_stmt.bind_text_utf8(12, "RUNNING"))) return s.error();
     Result<bool> job_step = job_stmt.step();
     if (!job_step) return job_step.error();
 
@@ -216,7 +219,7 @@ Result<LoadedJob> StateDb::load_job() {
     Result<sqlite_util::Statement> prepared = sqlite_util::Statement::prepare(
         db_,
         "SELECT run_id, tool_version, source_root, output_pst, root_name, outlook_bitness, "
-        "created_at_utc, manifest_hash, status FROM job WHERE id = 1;");
+        "created_at_utc, manifest_hash, folder_layout, status FROM job WHERE id = 1;");
     if (!prepared) return prepared.error();
     sqlite_util::Statement stmt = std::move(prepared.value());
     Result<bool> has_row = stmt.step();
@@ -235,7 +238,8 @@ Result<LoadedJob> StateDb::load_job() {
     loaded.info.outlook_bitness = stmt.column_text_utf8(5);
     loaded.info.created_at_utc = stmt.column_int64(6);
     loaded.info.manifest_hash = stmt.column_text_utf8(7);
-    loaded.status = stmt.column_text_utf8(8);
+    loaded.info.folder_layout = stmt.column_text_utf8(8);
+    loaded.status = stmt.column_text_utf8(9);
     return loaded;
 }
 
@@ -270,6 +274,9 @@ Status StateDb::check_resume_compatible(const JobInfo& expected, const std::stri
     }
     if (info.outlook_bitness != expected.outlook_bitness) {
         return make_error("StateDb::check_resume_compatible", "resume mismatch: outlook_bitness");
+    }
+    if (info.folder_layout != expected.folder_layout) {
+        return make_error("StateDb::check_resume_compatible", "resume mismatch: folder_layout");
     }
     if (loaded.value().schema_version != expected_schema_version) {
         return make_error("StateDb::check_resume_compatible", "resume mismatch: schema_version");
