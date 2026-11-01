@@ -4,6 +4,8 @@ WLM2PST converts a recursive folder tree of Windows Live Mail `.eml` files
 into **one** Unicode `.pst` file that opens locally in classic Microsoft
 Outlook. That is the entire product.
 
+Read the story behind this tool: [natanor.co.il/blog/law-office-email-migration](https://natanor.co.il/blog/law-office-email-migration/)
+
 ```powershell
 wlm2pst.exe --source "C:\Mail\Windows Live Mail" --output "D:\Migration\Sample-Mail.pst"
 ```
