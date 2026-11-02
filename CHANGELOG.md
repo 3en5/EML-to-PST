@@ -4,6 +4,13 @@ All notable changes to WLM2PST are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Changed
+
+- License changed from MIT to the GNU General Public License v3.0 (GPL-3.0-only). Versions 1.0.0 and 1.1.0 remain under MIT.
+- The release package now includes the license text as `LICENSE.txt`.
+
 ## [1.1.0] - 2026-09-03
 
 ### Added (sixth round - usable output)

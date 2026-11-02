@@ -304,7 +304,7 @@ was diagnosed, and why the tool drives Windows' own MimeOle engine — is in
 Developed by **[KALIT](https://kalit.co.il)** — the development arm of
 **[Natanor IT Services](https://natanor.co.il)**.
 
-Licensed under the [MIT License](LICENSE). Uses the SQLite amalgamation
+Licensed under the [GNU General Public License v3.0](LICENSE) (GPL-3.0-only) from the next release on; versions 1.0.0 and 1.1.0 were released under the MIT License. Uses the SQLite amalgamation
 (public domain) and Microsoft's Extended MAPI headers from the MAPI Stub
 Library (MIT); see [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
 

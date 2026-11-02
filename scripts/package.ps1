@@ -101,6 +101,7 @@ if (-not (Test-Path -LiteralPath $noticesSource)) {
 }
 Copy-Item -LiteralPath $readmeSource -Destination (Join-Path $packageDir "README.txt") -Force
 Copy-Item -LiteralPath $noticesSource -Destination (Join-Path $packageDir "THIRD-PARTY-NOTICES.txt") -Force
+Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE") -Destination (Join-Path $packageDir "LICENSE.txt") -Force
 
 # SQLite (public domain) blessing text - see third_party/sqlite/README.md.
 $sqliteLicenseText = @"
@@ -119,7 +120,7 @@ details.
 "@
 Set-Content -LiteralPath (Join-Path $licensesDir "SQLITE.txt") -Value $sqliteLicenseText -Encoding UTF8
 
-Write-Host "  wrote README.txt, THIRD-PARTY-NOTICES.txt, LICENSES\SQLITE.txt"
+Write-Host "  wrote README.txt, THIRD-PARTY-NOTICES.txt, LICENSE.txt, LICENSES\SQLITE.txt"
 
 # --- Zip ---------------------------------------------------------------------
 

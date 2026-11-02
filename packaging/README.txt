@@ -28,6 +28,7 @@ FILES IN THIS PACKAGE
   wlm2pst.exe                32-bit launcher - run this one.
   wlm2pst-worker-x86.exe     Win32 worker, used when Outlook is 32-bit.
   wlm2pst-worker-x64.exe     x64 worker, used when Outlook is 64-bit.
+  LICENSE.txt                GNU GPL v3.0 - the license of WLM2PST.
   THIRD-PARTY-NOTICES.txt    Third-party license notices.
   LICENSES\SQLITE.txt        SQLite public-domain statement.
 
